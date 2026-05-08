@@ -1,14 +1,15 @@
 """
-gemini.py — Wrapper untuk Gemini 1.5 Flash multimodal API calls.
+gemini.py — Wrapper untuk Gemini multimodal API calls dengan model fallback.
 
 Tanggung jawab:
   - Inisialisasi Gemini client (google-genai SDK)
+  - Model fallback chain (jika model utama gagal, coba model berikutnya)
   - Kirim request multimodal (teks + gambar)
   - Parse JSON response
   - Validasi terhadap Pydantic schema
   - Error handling pipeline sesuai prompts.md §Error Handling
 
-Ref: prompts.md v1.0.0, data-model.md v1.0.0
+Ref: prompts.md v1.0.0, data-model.md v1.0.0, Buku Saku BBPOPT 2020
 """
 
 import json
@@ -27,8 +28,8 @@ from models.schemas import (
 )
 from prompts.system import (
     DISCLAIMER,
-    GEMINI_MODEL,
     GENERATION_CONFIG,
+    MODEL_CHAIN,
     get_system_prompt,
 )
 
@@ -79,6 +80,31 @@ def _get_client() -> genai.Client:
 
 
 # ============================================================
+# Error Classification — menentukan apakah error bisa di-retry
+# ============================================================
+
+# Error codes dari Google API yang menandakan model gagal / rate limited
+_RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
+_RETRYABLE_ERROR_STRINGS = [
+    "rate limit",
+    "quota",
+    "resource exhausted",
+    "overloaded",
+    "unavailable",
+    "internal",
+    "deadline exceeded",
+    "not found",           # model tidak tersedia
+    "not supported",       # model tidak support generateContent
+]
+
+
+def _is_retryable_error(error: Exception) -> bool:
+    """Cek apakah error dari Gemini bisa di-retry dengan model lain."""
+    error_str = str(error).lower()
+    return any(s in error_str for s in _RETRYABLE_ERROR_STRINGS)
+
+
+# ============================================================
 # Content Builder
 # ============================================================
 
@@ -89,18 +115,7 @@ def _build_content_parts(
     label_bytes: bytes | None,
     label_mime: str | None,
 ) -> list:
-    """Bangun content parts untuk request multimodal Gemini.
-
-    Args:
-        mode: "plant" | "label" | "both"
-        plant_bytes: Raw bytes foto tanaman
-        plant_mime: MIME type foto tanaman
-        label_bytes: Raw bytes foto label
-        label_mime: MIME type foto label
-
-    Returns:
-        List of content parts (gambar inline + teks instruksi)
-    """
+    """Bangun content parts untuk request multimodal Gemini."""
     parts = []
 
     if mode in ("plant", "both") and plant_bytes:
@@ -140,7 +155,6 @@ def _build_content_parts(
 
 def _parse_plant_result(data: dict, processing_time_ms: int) -> AnalysisResult:
     """Parse response Gemini mode plant ke AnalysisResult."""
-    # Force hardcoded disclaimer — tidak boleh dari AI
     data["disclaimer"] = DISCLAIMER
     diagnosis = DiagnosisResult(**data)
 
@@ -166,7 +180,6 @@ def _parse_label_result(data: dict, processing_time_ms: int) -> AnalysisResult:
 
 def _parse_both_result(data: dict, processing_time_ms: int) -> AnalysisResult:
     """Parse response Gemini mode both ke AnalysisResult."""
-    # Force hardcoded disclaimer
     if "diagnosis" in data and data["diagnosis"]:
         data["diagnosis"]["disclaimer"] = DISCLAIMER
 
@@ -195,6 +208,80 @@ def _parse_both_result(data: dict, processing_time_ms: int) -> AnalysisResult:
 
 
 # ============================================================
+# Gemini API Call with Model Fallback
+# ============================================================
+
+async def _call_gemini_with_fallback(
+    system_prompt: str,
+    content_parts: list,
+) -> str:
+    """Panggil Gemini API dengan model fallback chain.
+
+    Mencoba setiap model dalam MODEL_CHAIN secara berurutan.
+    Jika model gagal karena rate limit, 404, atau error server,
+    otomatis pindah ke model berikutnya.
+
+    Returns:
+        Raw text response dari Gemini (harus JSON).
+
+    Raises:
+        GeminiError: Jika semua model gagal.
+    """
+    gemini_client = _get_client()
+
+    gen_config = types.GenerateContentConfig(
+        system_instruction=system_prompt,
+        temperature=GENERATION_CONFIG["temperature"],
+        top_p=GENERATION_CONFIG["top_p"],
+        max_output_tokens=GENERATION_CONFIG["max_output_tokens"],
+        response_mime_type=GENERATION_CONFIG["response_mime_type"],
+    )
+
+    last_error = None
+
+    for model_name in MODEL_CHAIN:
+        try:
+            logger.info(f"Trying model: {model_name}")
+
+            response = await gemini_client.aio.models.generate_content(
+                model=model_name,
+                contents=content_parts,
+                config=gen_config,
+            )
+
+            response_text = response.text
+            if response_text:
+                logger.info(f"Success with model: {model_name}")
+                return response_text
+
+            # Response kosong — coba model berikutnya
+            logger.warning(f"Empty response from {model_name}, trying next model...")
+            continue
+
+        except GeminiError:
+            raise
+        except Exception as e:
+            last_error = e
+            if _is_retryable_error(e):
+                logger.warning(f"Model {model_name} failed (retryable): {e}")
+                continue
+            else:
+                # Non-retryable error — langsung gagal
+                logger.error(f"Model {model_name} failed (non-retryable): {e}")
+                raise GeminiError(
+                    code="AI_ERROR",
+                    message="Terjadi kesalahan saat menganalisis foto. Silakan coba lagi.",
+                )
+
+    # Semua model gagal
+    logger.error(f"All models in chain failed. Last error: {last_error}")
+    raise GeminiError(
+        code="RATE_LIMITED",
+        message="Layanan AI sedang sibuk. Silakan tunggu beberapa saat dan coba lagi.",
+    )
+
+
+# ============================================================
 # Main Analysis Function
 # ============================================================
 
@@ -207,18 +294,11 @@ async def analyze_image(
 ) -> AnalysisResult:
     """Analisis foto tanaman/label menggunakan Gemini multimodal.
 
-    Pipeline validasi (sesuai prompts.md §Error Handling):
-        1. Panggil Gemini API → GeminiError(AI_ERROR)
-        2. Parse JSON response → GeminiError(AI_ERROR)
-        3. Cek field "error" di response → GeminiError(INVALID_IMAGE)
-        4. Validasi schema Pydantic → GeminiError(AI_ERROR)
-
-    Args:
-        mode: "plant" | "label" | "both"
-        plant_bytes: Raw bytes foto tanaman (required jika mode = plant|both)
-        plant_mime: MIME type foto tanaman
-        label_bytes: Raw bytes foto label (required jika mode = label|both)
-        label_mime: MIME type foto label
+    Pipeline:
+        1. Panggil Gemini API (dengan model fallback) → raw JSON text
+        2. Parse JSON response
+        3. Cek field "error" di response → INVALID_IMAGE
+        4. Validasi schema Pydantic → AnalysisResult
 
     Returns:
         AnalysisResult yang sudah divalidasi.
@@ -228,45 +308,20 @@ async def analyze_image(
     """
     start_time = time.time()
 
-    # Bangun system prompt dan content parts
     system_prompt = get_system_prompt(mode)
     content_parts = _build_content_parts(
         mode, plant_bytes, plant_mime, label_bytes, label_mime
     )
 
-    # Konfigurasi generate
-    gen_config = types.GenerateContentConfig(
-        system_instruction=system_prompt,
-        temperature=GENERATION_CONFIG["temperature"],
-        top_p=GENERATION_CONFIG["top_p"],
-        max_output_tokens=GENERATION_CONFIG["max_output_tokens"],
-        response_mime_type=GENERATION_CONFIG["response_mime_type"],
-    )
-
-    # === Step 1: Panggil Gemini API ===
-    try:
-        gemini_client = _get_client()
-        response = await gemini_client.aio.models.generate_content(
-            model=GEMINI_MODEL,
-            contents=content_parts,
-            config=gen_config,
-        )
-    except GeminiError:
-        raise
-    except Exception as e:
-        logger.error(f"Gemini API call failed: {e}")
-        raise GeminiError(
-            code="AI_ERROR",
-            message="Terjadi kesalahan saat menganalisis foto. Silakan coba lagi.",
-        )
+    # === Step 1: Panggil Gemini API dengan fallback ===
+    response_text = await _call_gemini_with_fallback(system_prompt, content_parts)
 
     # === Step 2: Parse JSON response ===
     try:
-        response_text = response.text
         result_data = json.loads(response_text)
-    except (json.JSONDecodeError, ValueError, AttributeError) as e:
+    except (json.JSONDecodeError, ValueError) as e:
         logger.error(f"Failed to parse Gemini JSON response: {e}")
-        logger.debug(f"Raw response: {getattr(response, 'text', 'N/A')}")
+        logger.debug(f"Raw response: {response_text[:500]}")
         raise GeminiError(
             code="AI_ERROR",
             message="Terjadi kesalahan saat menganalisis foto. Silakan coba lagi.",
@@ -283,7 +338,6 @@ async def analyze_image(
             ),
         )
 
-    # Hitung processing time
     processing_time_ms = int((time.time() - start_time) * 1000)
 
     # === Step 4: Validasi schema dan bangun AnalysisResult ===
@@ -303,7 +357,7 @@ async def analyze_image(
         raise
     except Exception as e:
         logger.error(f"Schema validation failed: {e}")
-        logger.debug(f"Result data: {result_data}")
+        logger.debug(f"Result data: {json.dumps(result_data, ensure_ascii=False)[:1000]}")
         raise GeminiError(
             code="AI_ERROR",
             message="Terjadi kesalahan saat memproses hasil analisis. Silakan coba lagi.",

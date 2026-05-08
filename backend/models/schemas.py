@@ -2,6 +2,7 @@
 schemas.py — Semua Pydantic request/response models untuk LeafGuard Tani API.
 
 Ref: data-model.md v1.0.0, api-contracts.md v1.0.0
+     Buku Saku Penyakit Padi (BBPOPT 2020) — extended fields
 """
 
 from enum import Enum
@@ -29,14 +30,27 @@ class Confidence(str, Enum):
 
 
 class Urgency(str, Enum):
-    """Tingkat urgensi penanganan."""
+    """Tingkat urgensi penanganan.
+
+    Skala sesuai Buku Saku Penyakit Padi (BBPOPT 2020):
+      - IMMEDIATE : Potensi kehilangan hasil besar, tindakan ≤ 1×24 jam
+      - HIGH      : Perlu tindakan dalam 2–3 hari
+      - MEDIUM    : Pantau dan tindak dalam 1 minggu
+      - LOW       : Observasi, belum perlu pengendalian segera
+      - WITHIN_3_DAYS : alias legacy (dipakai frontend lama)
+      - MONITOR      : alias legacy
+    """
     IMMEDIATE = "IMMEDIATE"
+    HIGH = "HIGH"
+    MEDIUM = "MEDIUM"
+    LOW = "LOW"
+    # Legacy aliases agar frontend lama tetap kompatibel
     WITHIN_3_DAYS = "WITHIN_3_DAYS"
     MONITOR = "MONITOR"
 
 
 # ============================================================
-# Data Models — sesuai data-model.md
+# Data Models — sesuai data-model.md + extended BBPOPT fields
 # ============================================================
 
 class ActiveIngredient(BaseModel):
@@ -45,10 +59,32 @@ class ActiveIngredient(BaseModel):
     concentration: str
 
 
+class ControlMeasures(BaseModel):
+    """Langkah-langkah pengendalian penyakit (dari Buku Saku BBPOPT)."""
+    preventive: list[str] = Field(
+        default_factory=list,
+        description="Langkah pencegahan",
+    )
+    curative: list[str] = Field(
+        default_factory=list,
+        description="Langkah kuratif/pengobatan",
+    )
+
+
 class DiagnosisResult(BaseModel):
-    """Output diagnosa tanaman dari Gemini. Mode: plant | both."""
+    """Output diagnosa tanaman dari Gemini. Mode: plant | both.
+
+    Field inti (wajib):
+        disease_id, disease_name, confidence, confidence_score,
+        urgency, symptom_description, spread_mechanism, is_healthy, disclaimer
+
+    Field extended (opsional — dari Buku Saku BBPOPT 2020):
+        pathogen, pathogen_type, affected_part, epidemic_factors,
+        control_measures, reference
+    """
+    # === Field Inti ===
     disease_id: str = Field(
-        description="Salah satu dari: D01-D06, HEALTHY, atau UNKNOWN"
+        description="D01-D20, HEALTHY, atau UNKNOWN"
     )
     disease_name: str = Field(
         description="Nama penyakit dalam Bahasa Indonesia"
@@ -60,7 +96,33 @@ class DiagnosisResult(BaseModel):
     spread_mechanism: str
     is_healthy: bool
     disclaimer: str = Field(
-        description="SELALU: 'Hasil ini adalah diagnosa awal. Konfirmasikan dengan penyuluh pertanian untuk penanganan lanjutan.'"
+        description="SELALU hardcoded dari server, bukan dari AI"
+    )
+
+    # === Field Extended (Buku Saku BBPOPT 2020) ===
+    pathogen: Optional[str] = Field(
+        default=None,
+        description="Nama Latin patogen (e.g. 'Pyricularia oryzae')",
+    )
+    pathogen_type: Optional[str] = Field(
+        default=None,
+        description="Jenis patogen: Jamur, Bakteri, Nematoda, Serangga",
+    )
+    affected_part: Optional[str] = Field(
+        default=None,
+        description="Bagian tanaman yang terinfeksi: Daun, Pelepah, Leher Malai, Bulir, Batang",
+    )
+    epidemic_factors: Optional[list[str]] = Field(
+        default=None,
+        description="Faktor-faktor yang mempercepat epidemi",
+    )
+    control_measures: Optional[ControlMeasures] = Field(
+        default=None,
+        description="Langkah pengendalian preventif & kuratif",
+    )
+    reference: Optional[str] = Field(
+        default=None,
+        description="Sumber referensi diagnosis",
     )
 
 
