@@ -35,7 +35,7 @@ export class ApiError extends Error {
  * @returns {Promise<import('../mocks/sampleData').AnalysisResult>} Data hasil analisis
  * @throws {ApiError} Jika request gagal atau backend mengembalikan error
  */
-export async function analyze({ mode, plantImage, labelImage }) {
+export async function analyze({ mode, plantImage, labelImage, signal }) {
   const form = new FormData();
   form.append('mode', mode);
   if (plantImage) form.append('plant_image', plantImage);
@@ -45,6 +45,7 @@ export async function analyze({ mode, plantImage, labelImage }) {
     const response = await fetch(`${BASE_URL}/analyze`, {
       method: 'POST',
       body: form,
+      signal,
     });
 
     // Handle non-JSON responses (e.g., 502 Bad Gateway)

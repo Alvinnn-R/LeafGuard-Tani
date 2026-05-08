@@ -1,7 +1,8 @@
 import React, { useState, useCallback, useMemo } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Send, RotateCcw } from 'lucide-react';
-import useAnalysis from '../hooks/useAnalysis';
+import { ArrowLeft, RotateCcw, Leaf, Tags, Layers } from 'lucide-react';
+
+// Components
 import UploadZone from '../components/UploadZone';
 import LoadingState from '../components/LoadingState';
 import ErrorState from '../components/ErrorState';
@@ -10,32 +11,36 @@ import LabelResult from '../components/LabelResult';
 import RecommendationCard from '../components/RecommendationCard';
 import SummaryCard from '../components/SummaryCard';
 
+// Hooks & Services
+import { useAnalysisContext } from '../context/AnalysisContext';
+import { saveToHistory } from '../services/storage';
+
 /**
- * Analysis — Halaman upload → proses → hasil analisis.
+ * Analysis — Halaman utama flow analisis.
  *
- * Flow:
- *   1. Mode dipilih dari Home (via query param ?mode=plant|label|both)
- *   2. User upload foto → UploadZone
- *   3. Klik "Analisis" → LoadingState
- *   4. Hasil → AnalysisResult / LabelResult / RecommendationCard
- *   5. SummaryCard + tombol "Analisis Baru"
- *
- * Ref: tasks.md T032, spec.md §US1-US3
+ * Flow: mode (dari query param) → upload foto → loading → result → summary
+ * State transitions: data-model.md §State Transitions
  */
 
 const MODE_CONFIG = {
   plant: {
     title: 'Analisis Tanaman',
+    icon: Leaf,
+    color: 'text-green-600',
     needsPlant: true,
     needsLabel: false,
   },
   label: {
-    title: 'Baca Label',
+    title: 'Baca Label Produk',
+    icon: Tags,
+    color: 'text-blue-600',
     needsPlant: false,
     needsLabel: true,
   },
   both: {
     title: 'Analisis Lengkap',
+    icon: Layers,
+    color: 'text-purple-600',
     needsPlant: true,
     needsLabel: true,
   },
@@ -44,29 +49,43 @@ const MODE_CONFIG = {
 export default function Analysis() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const mode = searchParams.get('mode') || 'plant';
-  const config = MODE_CONFIG[mode] || MODE_CONFIG.plant;
-
-  // Image state
-  const [plantImage, setPlantImage] = useState(null);
-  const [labelImage, setLabelImage] = useState(null);
-
+  const queryMode = searchParams.get('mode');
+  
   // Analysis hook
   const {
+    plantImage,
+    setPlantImage,
+    labelImage,
+    setLabelImage,
     status,
     result,
     error,
+    mode: contextMode,
     isIdle,
     isProcessing,
     isSuccess,
     isError,
     runAnalysis,
+    cancelAnalysis,
     retry,
     reset,
-  } = useAnalysis();
+  } = useAnalysisContext();
+
+  React.useEffect(() => {
+    // Jika user explicitly memilih mode dari Beranda (?mode=xxx)
+    // yang berbeda dari mode di riwayat (contextMode), reset state.
+    if (queryMode && contextMode && queryMode !== contextMode) {
+      reset();
+    }
+  }, [queryMode, contextMode, reset]);
+
+  // activeMode = prioritas query URL > prioritas context > default 'plant'
+  const activeMode = queryMode || contextMode || 'plant';
+  const config = MODE_CONFIG[activeMode] || MODE_CONFIG.plant;
+  const mode = activeMode;
 
   /**
-   * Cek apakah semua foto yang dibutuhkan sudah diunggah
+   * Cek apakah semua foto yang dibutuhkan sudah ada
    */
   const canSubmit = useMemo(() => {
     if (config.needsPlant && !plantImage) return false;
@@ -75,165 +94,231 @@ export default function Analysis() {
   }, [config, plantImage, labelImage]);
 
   /**
-   * Kirim foto ke backend untuk dianalisis
+   * URL preview untuk animasi scanning (memoized agar tidak bocor memory)
+   */
+  const scanPreviewUrl = useMemo(() => {
+    const file = plantImage || labelImage;
+    if (!file) return null;
+    return URL.createObjectURL(file);
+  }, [plantImage, labelImage]);
+
+  // Cleanup URL saat berubah
+  React.useEffect(() => {
+    return () => {
+      if (scanPreviewUrl) URL.revokeObjectURL(scanPreviewUrl);
+    };
+  }, [scanPreviewUrl]);
+
+  /**
+   * Submit analisis
    */
   const handleSubmit = useCallback(async () => {
-    if (!canSubmit) return;
+    const data = await runAnalysis({ mode, plantImage, labelImage });
 
-    await runAnalysis({
-      mode,
-      plantImage: config.needsPlant ? plantImage : null,
-      labelImage: config.needsLabel ? labelImage : null,
-    });
-  }, [canSubmit, mode, plantImage, labelImage, config, runAnalysis]);
+    // Simpan ke history jika berhasil
+    if (data) {
+      saveToHistory({
+        id: crypto.randomUUID(),
+        created_at: new Date().toISOString(),
+        mode,
+        plant_image_url: null,
+        label_image_url: null,
+        result: data,
+      });
+    }
+  }, [mode, plantImage, labelImage, runAnalysis]);
 
   /**
-   * Reset semua dan mulai analisis baru
+   * Reset semua state untuk analisis baru
    */
   const handleNewAnalysis = useCallback(() => {
-    reset();
     setPlantImage(null);
     setLabelImage(null);
-    navigate('/');
-  }, [reset, navigate]);
-
-  /**
-   * Reset dan tetap di mode yang sama
-   */
-  const handleRetryFresh = useCallback(() => {
     reset();
-    setPlantImage(null);
-    setLabelImage(null);
   }, [reset]);
 
-  // === RENDER: Loading State ===
-  if (isProcessing) {
-    return <LoadingState mode={mode} />;
-  }
+  /**
+   * Kembali ke home
+   */
+  const handleBack = useCallback(() => {
+    navigate('/');
+  }, [navigate]);
 
-  // === RENDER: Error State ===
-  if (isError && error) {
-    return (
-      <ErrorState
-        code={error.code}
-        message={error.message}
-        retryable={error.retryable}
-        onRetry={retry}
-        onUploadAgain={handleRetryFresh}
-      />
-    );
-  }
+  /**
+   * Reset dari error → kembali ke upload
+   */
+  const handleResetFromError = useCallback(() => {
+    setPlantImage(null);
+    setLabelImage(null);
+    reset();
+  }, [reset]);
 
-  // === RENDER: Success — Show Results ===
-  if (isSuccess && result) {
-    return (
-      <div className="px-4 pt-6 pb-8 max-w-lg mx-auto">
-        {/* Header */}
+  return (
+    <div className="min-h-screen bg-[var(--color-bg)]">
+
+      {/* Loading overlay with scanning animation */}
+      {isProcessing && (
+        <LoadingState
+          mode={mode}
+          imageUrl={scanPreviewUrl}
+          onCancel={cancelAnalysis}
+        />
+      )}
+
+      {/* Error overlay */}
+      {isError && error && (
+        <ErrorState
+          code={error.code}
+          message={error.message}
+          retryable={error.retryable}
+          onRetry={retry}
+          onReset={handleResetFromError}
+        />
+      )}
+
+      {/* Main content */}
+      <div className="px-5 py-4 pb-safe-nav">
+
+        {/* Header bar */}
         <div className="flex items-center gap-3 mb-6">
           <button
-            onClick={handleNewAnalysis}
-            className="w-10 h-10 rounded-xl bg-gray-100 flex items-center justify-center 
-                       hover:bg-gray-200 transition-colors min-h-[44px] min-w-[44px]"
+            type="button"
+            onClick={handleBack}
+            className="w-10 h-10 rounded-xl bg-white border border-gray-200 
+                       flex items-center justify-center
+                       hover:bg-gray-50 active:scale-95 
+                       transition-all duration-200
+                       min-h-[44px] min-w-[44px]"
+            aria-label="Kembali ke beranda"
           >
             <ArrowLeft size={20} className="text-gray-600" />
           </button>
-          <h1 className="text-lg font-bold text-gray-900">Hasil Analisis</h1>
+          <div className="flex items-center gap-2">
+            <img src="/logo/logo_2.svg" alt="" className="w-6 h-6 object-contain" />
+            <h1 className="text-lg font-bold text-gray-900">{config.title}</h1>
+          </div>
         </div>
 
-        {/* Result Cards */}
-        <div className="space-y-4">
-          {result.diagnosis && (
-            <AnalysisResult diagnosis={result.diagnosis} />
-          )}
+        {/* === UPLOAD STATE === */}
+        {isIdle && (
+          <div className="animate-fade-in">
 
-          {result.label_info && (
-            <LabelResult labelInfo={result.label_info} />
-          )}
+            {/* Upload zones */}
+            <div className="space-y-4 mb-6">
+              {config.needsPlant && (
+                <UploadZone
+                  label="Foto Tanaman Padi"
+                  hint="Ambil foto daun, batang, atau malai tanaman padi"
+                  value={plantImage}
+                  onChange={setPlantImage}
+                />
+              )}
 
-          {result.recommendation && (
-            <RecommendationCard recommendation={result.recommendation} />
-          )}
+              {config.needsLabel && (
+                <UploadZone
+                  label="Foto Label Produk"
+                  hint="Ambil foto label kemasan pestisida atau pupuk"
+                  value={labelImage}
+                  onChange={setLabelImage}
+                />
+              )}
+            </div>
 
-          {/* Summary Card */}
-          <SummaryCard result={result} mode={mode} />
-        </div>
+            {/* Submit button */}
+            <button
+              type="button"
+              onClick={handleSubmit}
+              disabled={!canSubmit}
+              className={`
+                w-full btn-primary text-base py-3.5
+                ${!canSubmit ? 'opacity-40 cursor-not-allowed' : ''}
+              `}
+            >
+              Mulai Analisis
+            </button>
 
-        {/* Analisis Baru Button */}
-        <div className="mt-6">
-          <button
-            onClick={handleNewAnalysis}
-            className="w-full btn-primary py-3 text-base"
-          >
-            <RotateCcw size={18} />
-            Analisis Baru
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  // === RENDER: Upload Form (Idle State) ===
-  return (
-    <div className="px-4 pt-6 pb-8 max-w-lg mx-auto">
-      {/* Header */}
-      <div className="flex items-center gap-3 mb-6">
-        <button
-          onClick={() => navigate('/')}
-          className="w-10 h-10 rounded-xl bg-gray-100 flex items-center justify-center 
-                     hover:bg-gray-200 transition-colors min-h-[44px] min-w-[44px]"
-        >
-          <ArrowLeft size={20} className="text-gray-600" />
-        </button>
-        <div>
-          <h1 className="text-lg font-bold text-gray-900">{config.title}</h1>
-          <p className="text-xs text-gray-500">Unggah foto untuk memulai analisis</p>
-        </div>
-      </div>
-
-      {/* Upload Zones */}
-      <div className="space-y-5">
-        {config.needsPlant && (
-          <UploadZone
-            label="Foto Tanaman Padi"
-            hint="Ambil foto daun, batang, atau malai tanaman padi"
-            value={plantImage}
-            onChange={setPlantImage}
-          />
+            {/* Mode info hint */}
+            <p className="text-xs text-gray-400 text-center mt-3">
+              {mode === 'plant' && 'AI akan mendiagnosa penyakit dari foto tanaman Anda'}
+              {mode === 'label' && 'AI akan membaca dan menjelaskan isi label produk'}
+              {mode === 'both' && 'AI akan mencocokkan produk dengan penyakit yang terdeteksi'}
+            </p>
+          </div>
         )}
 
-        {config.needsLabel && (
-          <UploadZone
-            label="Foto Label Produk"
-            hint="Ambil foto label kemasan pestisida atau pupuk"
-            value={labelImage}
-            onChange={setLabelImage}
-          />
+        {/* === RESULT STATE === */}
+        {isSuccess && result && (
+          <div className="space-y-4 animate-fade-in">
+
+            {/* Foto yang dianalisis */}
+            {scanPreviewUrl && (
+              <div className="card overflow-hidden p-0">
+                <div className="relative aspect-[16/10] bg-gray-100">
+                  <img
+                    src={scanPreviewUrl}
+                    alt="Foto yang dianalisis"
+                    className="w-full h-full object-cover"
+                  />
+                  {/* Gradient overlay bawah */}
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent" />
+                  {/* Badge mode di atas foto */}
+                  <div className="absolute top-3 left-3">
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 
+                                     bg-white/90 backdrop-blur-sm rounded-lg text-xs font-semibold text-gray-700 shadow-sm">
+                      <img src="/logo/logo_2.svg" alt="" className="w-3.5 h-3.5" />
+                      {config.title}
+                    </span>
+                  </div>
+                  {/* Status badge */}
+                  <div className="absolute bottom-3 left-3">
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 
+                                     bg-green-500/90 backdrop-blur-sm rounded-lg text-xs font-semibold text-white">
+                      ✓ Analisis Selesai
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Diagnosis card (mode: plant, both) */}
+            {result.diagnosis && (
+              <AnalysisResult diagnosis={result.diagnosis} />
+            )}
+
+            {/* Label card (mode: label, both) */}
+            {result.label_info && (
+              <LabelResult labelInfo={result.label_info} />
+            )}
+
+            {/* Recommendation card (mode: both only) */}
+            {result.recommendation && (
+              <RecommendationCard recommendation={result.recommendation} />
+            )}
+
+            {/* Summary + Share card */}
+            <SummaryCard result={result} mode={mode} />
+
+            {/* Processing time */}
+            {result.processing_time_ms && (
+              <p className="text-xs text-gray-400 text-center">
+                Dianalisis dalam {(result.processing_time_ms / 1000).toFixed(1)} detik
+              </p>
+            )}
+
+            {/* New analysis button */}
+            <div className="pt-2 pb-4">
+              <button
+                type="button"
+                onClick={handleNewAnalysis}
+                className="w-full btn-outline text-base"
+              >
+                <RotateCcw size={18} />
+                Analisis Baru
+              </button>
+            </div>
+          </div>
         )}
       </div>
-
-      {/* Submit Button */}
-      <div className="mt-6">
-        <button
-          onClick={handleSubmit}
-          disabled={!canSubmit}
-          className={`w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl
-                     text-base font-semibold transition-all duration-200 min-h-[44px]
-                     ${canSubmit
-                       ? 'bg-primary text-white hover:bg-green-700 active:scale-[0.98] shadow-md shadow-green-200'
-                       : 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                     }`}
-        >
-          <Send size={18} />
-          Mulai Analisis
-        </button>
-      </div>
-
-      {/* Info */}
-      {!canSubmit && (
-        <p className="text-xs text-gray-400 text-center mt-3 animate-fade-in">
-          Unggah semua foto yang dibutuhkan untuk melanjutkan
-        </p>
-      )}
     </div>
   );
 }
