@@ -31,6 +31,7 @@ from prompts.system import (
     GENERATION_CONFIG,
     MODEL_CHAIN,
     PREVALIDATION_CONFIG,
+    SKIP_PREVALIDATION,
     get_prevalidation_prompt,
     get_system_prompt,
 )
@@ -316,36 +317,30 @@ async def _prevalidate_image(
         "Apakah ini foto yang valid? Jawab dalam JSON.",
     ]
 
-    # Coba hanya model utama (tercepat) untuk pre-validation
-    # Tidak perlu fallback chain — ini hanya skrining awal
-    for model_name in MODEL_CHAIN[:3]:  # Coba max 3 model saja
-        try:
-            logger.info(f"Pre-validation with model: {model_name}")
-            response = await gemini_client.aio.models.generate_content(
-                model=model_name,
-                contents=content_parts,
-                config=gen_config,
-            )
+    try:
+        # Gunakan model pertama di chain (paling cepat)
+        model_name = MODEL_CHAIN[0]
+        logger.info(f"Pre-validation ({image_type}) with model: {model_name}")
 
-            if not response.text:
-                continue
+        response = await gemini_client.aio.models.generate_content(
+            model=model_name,
+            contents=content_parts,
+            config=gen_config,
+        )
 
-            result = json.loads(response.text)
-            is_valid = result.get("valid", True)  # Default True agar tidak false-reject
-            logger.info(f"Pre-validation result: valid={is_valid} (model: {model_name})")
-            return is_valid
+        if not response.text:
+            logger.warning("Pre-validation returned empty response, skipping")
+            return True  # Anggap valid
 
-        except Exception as e:
-            logger.warning(f"Pre-validation failed with {model_name}: {e}")
-            if _is_retryable_error(e):
-                continue
-            # Non-retryable: skip pre-validation, lanjut ke analysis
-            logger.warning("Pre-validation skipped due to non-retryable error")
-            return True  # Anggap valid, biar full analysis yang putuskan
+        result = json.loads(response.text)
+        is_valid = result.get("valid", True)  # Default True agar tidak false-reject
+        logger.info(f"Pre-validation result ({image_type}): valid={is_valid}")
+        return is_valid
 
-    # Jika semua model pre-validation gagal, skip saja
-    logger.warning("All pre-validation models failed, skipping pre-validation")
-    return True  # Anggap valid agar tidak memblokir user
+    except Exception as e:
+        # Jika pre-validation gagal, skip saja — biar full analysis yang putuskan
+        logger.warning(f"Pre-validation failed ({image_type}): {e}, skipping")
+        return True  # Anggap valid agar tidak memblokir user
 
 
 # ============================================================
@@ -362,6 +357,7 @@ async def analyze_image(
     """Analisis foto tanaman/label menggunakan Gemini multimodal.
 
     Pipeline:
+        0. Pre-validation — skrining cepat gambar (ringan, ~1-2 detik)
         1. Panggil Gemini API (dengan model fallback) → raw JSON text
         2. Parse JSON response
         3. Cek field "error" di response → INVALID_IMAGE
@@ -375,34 +371,37 @@ async def analyze_image(
     """
     start_time = time.time()
 
+    # === Step 0: Pre-validation — skrining cepat gambar ===
+    # Dilewati jika SKIP_PREVALIDATION=True (hemat quota free tier)
+    if not SKIP_PREVALIDATION:
+        if mode in ("plant", "both") and plant_bytes:
+            is_valid_plant = await _prevalidate_image(
+                plant_bytes, plant_mime or "image/jpeg", "plant"
+            )
+            if not is_valid_plant:
+                logger.info("Pre-validation rejected plant image (not rice plant)")
+                raise GeminiError(
+                    code="INVALID_IMAGE",
+                    message="Unggah foto daun, batang, atau malai tanaman padi yang cukup jelas dan terang.",
+                )
+
+        if mode in ("label", "both") and label_bytes:
+            is_valid_label = await _prevalidate_image(
+                label_bytes, label_mime or "image/jpeg", "label"
+            )
+            if not is_valid_label:
+                logger.info("Pre-validation rejected label image (not agricultural label)")
+                raise GeminiError(
+                    code="INVALID_IMAGE",
+                    message="Unggah foto label kemasan pestisida atau pupuk pertanian.",
+                )
+    else:
+        logger.info("Pre-validation skipped (SKIP_PREVALIDATION=True, hemat quota)")
+
     system_prompt = get_system_prompt(mode)
     content_parts = _build_content_parts(
         mode, plant_bytes, plant_mime, label_bytes, label_mime
     )
-
-    # === Step 0: Pre-validation — skrining cepat gambar ===
-    # Tolak gambar non-padi/non-label SEBELUM menjalankan prompt berat
-    if mode in ("plant", "both") and plant_bytes:
-        is_valid_plant = await _prevalidate_image(
-            plant_bytes, plant_mime or "image/jpeg", "plant"
-        )
-        if not is_valid_plant:
-            logger.info("Pre-validation rejected plant image (not rice plant)")
-            raise GeminiError(
-                code="INVALID_IMAGE",
-                message="Unggah foto daun, batang, atau malai tanaman padi yang cukup jelas dan terang.",
-            )
-
-    if mode in ("label", "both") and label_bytes:
-        is_valid_label = await _prevalidate_image(
-            label_bytes, label_mime or "image/jpeg", "label"
-        )
-        if not is_valid_label:
-            logger.info("Pre-validation rejected label image (not agricultural label)")
-            raise GeminiError(
-                code="INVALID_IMAGE",
-                message="Unggah foto label kemasan pestisida atau pupuk pertanian.",
-            )
 
     # === Step 1: Panggil Gemini API dengan fallback ===
     response_text = await _call_gemini_with_fallback(system_prompt, content_parts)
