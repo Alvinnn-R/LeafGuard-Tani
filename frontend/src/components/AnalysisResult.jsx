@@ -136,7 +136,7 @@ export default function AnalysisResult({ diagnosis }) {
         {/* Gejala yang terdeteksi */}
         <div className="mb-4">
           <div className="flex items-center gap-2 mb-2">
-            <Leaf size={16} className="text-primary flex-shrink-0" />
+            <img src="/logo/logo_2.svg" alt="LeafGuard" className="w-4 h-4 object-contain flex-shrink-0" />
             <h3 className="text-sm font-semibold text-gray-700">
               Gejala yang Terdeteksi
             </h3>

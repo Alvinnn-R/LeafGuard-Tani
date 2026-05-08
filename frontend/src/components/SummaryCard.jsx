@@ -148,8 +148,8 @@ export default function SummaryCard({ result, mode }) {
       <div className="card bg-gradient-to-br from-primary to-primary-dark text-white overflow-hidden relative">
 
         {/* Decorative pattern */}
-        <div className="absolute top-0 right-0 w-32 h-32 opacity-10">
-          <Leaf size={128} className="text-white -rotate-12" />
+        <div className="absolute -top-4 -right-4 w-32 h-32 opacity-10 flex items-center justify-center">
+          <img src="/logo/logo_2.svg" alt="" className="w-32 h-32 object-contain -rotate-12 brightness-0 invert" />
         </div>
 
         {/* Content */}
@@ -157,7 +157,7 @@ export default function SummaryCard({ result, mode }) {
 
           {/* Header */}
           <div className="flex items-center gap-2 mb-4">
-            <Leaf size={18} className="text-green-200" />
+            <img src="/logo/logo_2.svg" alt="" className="w-5 h-5 object-contain brightness-0 invert opacity-80" />
             <p className="text-xs font-semibold text-green-200 uppercase tracking-wider">
               Ringkasan Analisis
             </p>

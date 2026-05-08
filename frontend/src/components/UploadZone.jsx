@@ -1,9 +1,12 @@
-import React, { useState, useRef, useCallback } from 'react';
-import { Camera, ImagePlus, X, RotateCcw, AlertCircle } from 'lucide-react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
+import { Camera, ImagePlus, X, RotateCcw, AlertCircle, SwitchCamera } from 'lucide-react';
 import imageCompression from 'browser-image-compression';
 
 /**
  * UploadZone — Komponen upload foto dengan dukungan kamera dan galeri.
+ * 
+ * Kamera: di HP → buka kamera native via capture="environment"
+ *         di Desktop → buka webcam modal via getUserMedia
  * 
  * @param {Object} props
  * @param {string} props.label - Label yang ditampilkan (e.g., "Foto Tanaman", "Foto Label")
@@ -24,6 +27,15 @@ const COMPRESSION_OPTIONS = {
   fileType: 'image/jpeg',
 };
 
+/**
+ * Deteksi apakah device ini mobile/tablet (yang punya kamera native)
+ */
+function isMobileDevice() {
+  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+    navigator.userAgent
+  ) || (navigator.maxTouchPoints && navigator.maxTouchPoints > 2);
+}
+
 export default function UploadZone({
   label,
   hint,
@@ -37,8 +49,145 @@ export default function UploadZone({
   const [error, setError] = useState(null);
   const [dragActive, setDragActive] = useState(false);
 
+  // Webcam states (untuk desktop)
+  const [showWebcam, setShowWebcam] = useState(false);
+  const [webcamReady, setWebcamReady] = useState(false);
+  const [webcamError, setWebcamError] = useState(null);
+  const [facingMode, setFacingMode] = useState('environment');
+
   const cameraInputRef = useRef(null);
   const galleryInputRef = useRef(null);
+  const videoRef = useRef(null);
+  const streamRef = useRef(null);
+  const canvasRef = useRef(null);
+
+  /**
+   * Stop webcam stream — penting untuk melepas kamera saat modal ditutup
+   */
+  const stopWebcam = useCallback(() => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    }
+    setWebcamReady(false);
+    setWebcamError(null);
+  }, []);
+
+  /**
+   * Start webcam stream
+   */
+  const startWebcam = useCallback(async (facing = 'environment') => {
+    setWebcamError(null);
+    setWebcamReady(false);
+
+    // Stop previous stream jika ada
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+    }
+
+    try {
+      const constraints = {
+        video: {
+          facingMode: facing,
+          width: { ideal: 1280 },
+          height: { ideal: 960 },
+        },
+        audio: false,
+      };
+
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      streamRef.current = stream;
+
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.onloadedmetadata = () => {
+          videoRef.current.play();
+          setWebcamReady(true);
+        };
+      }
+    } catch (err) {
+      console.error('Gagal mengakses kamera:', err);
+      if (err.name === 'NotAllowedError') {
+        setWebcamError('Izin kamera ditolak. Berikan izin kamera di pengaturan browser Anda.');
+      } else if (err.name === 'NotFoundError') {
+        setWebcamError('Kamera tidak ditemukan pada perangkat ini.');
+      } else {
+        setWebcamError('Gagal mengakses kamera. Pastikan kamera tidak digunakan aplikasi lain.');
+      }
+    }
+  }, []);
+
+  /**
+   * Buka webcam modal (desktop) atau kamera native (mobile)
+   */
+  const openCamera = useCallback(() => {
+    if (isMobileDevice()) {
+      // Mobile: gunakan input capture native
+      cameraInputRef.current?.click();
+    } else {
+      // Desktop: buka webcam modal
+      setShowWebcam(true);
+      startWebcam(facingMode);
+    }
+  }, [startWebcam, facingMode]);
+
+  /**
+   * Tutup webcam modal
+   */
+  const closeWebcam = useCallback(() => {
+    stopWebcam();
+    setShowWebcam(false);
+  }, [stopWebcam]);
+
+  /**
+   * Switch kamera depan/belakang
+   */
+  const switchCamera = useCallback(() => {
+    const newFacing = facingMode === 'environment' ? 'user' : 'environment';
+    setFacingMode(newFacing);
+    startWebcam(newFacing);
+  }, [facingMode, startWebcam]);
+
+  /**
+   * Ambil foto dari webcam
+   */
+  const capturePhoto = useCallback(() => {
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    if (!video || !canvas) return;
+
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+
+    const ctx = canvas.getContext('2d');
+    // Mirror gambar jika kamera depan
+    if (facingMode === 'user') {
+      ctx.translate(canvas.width, 0);
+      ctx.scale(-1, 1);
+    }
+    ctx.drawImage(video, 0, 0);
+
+    canvas.toBlob(
+      (blob) => {
+        if (blob) {
+          const file = new File([blob], `kamera-${Date.now()}.jpg`, {
+            type: 'image/jpeg',
+          });
+          closeWebcam();
+          processFile(file);
+        }
+      },
+      'image/jpeg',
+      0.92
+    );
+  }, [facingMode, closeWebcam]);
+
+  // Cleanup saat component unmount
+  useEffect(() => {
+    return () => {
+      stopWebcam();
+    };
+  }, [stopWebcam]);
 
   /**
    * Validasi file: cek MIME type dan ukuran
@@ -154,13 +303,6 @@ export default function UploadZone({
   }, [preview, onChange]);
 
   /**
-   * Buka kamera
-   */
-  const openCamera = useCallback(() => {
-    cameraInputRef.current?.click();
-  }, []);
-
-  /**
    * Buka galeri
    */
   const openGallery = useCallback(() => {
@@ -185,7 +327,7 @@ export default function UploadZone({
       <input
         ref={cameraInputRef}
         type="file"
-        accept={accept}
+        accept="image/*"
         capture="environment"
         onChange={handleFileChange}
         className="hidden"
@@ -199,8 +341,107 @@ export default function UploadZone({
         className="hidden"
         aria-hidden="true"
       />
+      {/* Hidden canvas for webcam capture */}
+      <canvas ref={canvasRef} className="hidden" />
 
+      {/* ============================================ */}
+      {/* WEBCAM MODAL (Desktop only) */}
+      {/* ============================================ */}
+      {showWebcam && (
+        <div className="fixed inset-0 z-50 bg-black flex flex-col">
+          {/* Video feed */}
+          <div className="flex-1 relative overflow-hidden flex items-center justify-center bg-black">
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              muted
+              className={`w-full h-full object-cover ${facingMode === 'user' ? 'scale-x-[-1]' : ''}`}
+            />
+
+            {/* Loading kamera */}
+            {!webcamReady && !webcamError && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/80">
+                <div className="w-10 h-10 border-[3px] border-white/30 border-t-white rounded-full animate-spin mb-4" />
+                <p className="text-white text-sm">Mengakses kamera...</p>
+              </div>
+            )}
+
+            {/* Error kamera */}
+            {webcamError && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/90 px-6">
+                <AlertCircle size={48} className="text-red-400 mb-4" />
+                <p className="text-white text-sm text-center mb-6">{webcamError}</p>
+                <button
+                  type="button"
+                  onClick={closeWebcam}
+                  className="px-6 py-2.5 bg-white text-gray-900 rounded-xl text-sm font-semibold
+                             min-h-[44px] active:scale-95 transition-transform"
+                >
+                  Kembali
+                </button>
+              </div>
+            )}
+
+            {/* Viewfinder overlay */}
+            {webcamReady && (
+              <div className="absolute inset-0 pointer-events-none">
+                {/* Corner brackets */}
+                <div className="absolute top-[15%] left-[10%] w-12 h-12 border-t-2 border-l-2 border-white/60 rounded-tl-xl" />
+                <div className="absolute top-[15%] right-[10%] w-12 h-12 border-t-2 border-r-2 border-white/60 rounded-tr-xl" />
+                <div className="absolute bottom-[25%] left-[10%] w-12 h-12 border-b-2 border-l-2 border-white/60 rounded-bl-xl" />
+                <div className="absolute bottom-[25%] right-[10%] w-12 h-12 border-b-2 border-r-2 border-white/60 rounded-br-xl" />
+              </div>
+            )}
+          </div>
+
+          {/* Controls bar */}
+          <div className="bg-black/95 px-6 py-5 flex items-center justify-between"
+               style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 20px)' }}>
+            {/* Tutup */}
+            <button
+              type="button"
+              onClick={closeWebcam}
+              className="w-12 h-12 rounded-full bg-white/15 flex items-center justify-center
+                         active:scale-90 transition-transform min-h-[44px] min-w-[44px]"
+              aria-label="Tutup kamera"
+            >
+              <X size={22} className="text-white" />
+            </button>
+
+            {/* Shutter button */}
+            <button
+              type="button"
+              onClick={capturePhoto}
+              disabled={!webcamReady}
+              className="w-[72px] h-[72px] rounded-full bg-white flex items-center justify-center
+                         ring-4 ring-white/30 ring-offset-2 ring-offset-black
+                         active:scale-90 transition-transform
+                         disabled:opacity-40 disabled:cursor-not-allowed"
+              aria-label="Ambil foto"
+            >
+              <div className="w-[60px] h-[60px] rounded-full bg-white border-2 border-gray-200" />
+            </button>
+
+            {/* Switch camera */}
+            <button
+              type="button"
+              onClick={switchCamera}
+              disabled={!webcamReady}
+              className="w-12 h-12 rounded-full bg-white/15 flex items-center justify-center
+                         active:scale-90 transition-transform min-h-[44px] min-w-[44px]
+                         disabled:opacity-40"
+              aria-label="Ganti kamera"
+            >
+              <SwitchCamera size={22} className="text-white" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================ */}
       {/* State: Preview foto */}
+      {/* ============================================ */}
       {preview && value ? (
         <div className="relative rounded-2xl overflow-hidden border-2 border-primary/20 bg-primary-light animate-slide-up">
           {/* Preview image */}
