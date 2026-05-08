@@ -9,7 +9,7 @@ Ref: prompts.md v1.0.0
 # Gemini Configuration — NON-NEGOTIABLE
 # ============================================================
 
-GEMINI_MODEL = "gemini-2.5-flash"
+GEMINI_MODEL = "gemini-2.5-flash-lite"
 
 GENERATION_CONFIG = {
     "temperature": 0.1,        # Rendah — output deterministik untuk diagnosis

@@ -12,7 +12,7 @@ import RecommendationCard from '../components/RecommendationCard';
 import SummaryCard from '../components/SummaryCard';
 
 // Hooks & Services
-import useAnalysis from '../hooks/useAnalysis';
+import { useAnalysisContext } from '../context/AnalysisContext';
 import { saveToHistory } from '../services/storage';
 
 /**
@@ -49,28 +49,40 @@ const MODE_CONFIG = {
 export default function Analysis() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-
-  const mode = searchParams.get('mode') || 'plant';
-  const config = MODE_CONFIG[mode] || MODE_CONFIG.plant;
-  const ModeIcon = config.icon;
-
-  // File states
-  const [plantImage, setPlantImage] = useState(null);
-  const [labelImage, setLabelImage] = useState(null);
-
+  const queryMode = searchParams.get('mode');
+  
   // Analysis hook
   const {
+    plantImage,
+    setPlantImage,
+    labelImage,
+    setLabelImage,
     status,
     result,
     error,
+    mode: contextMode,
     isIdle,
     isProcessing,
     isSuccess,
     isError,
     runAnalysis,
+    cancelAnalysis,
     retry,
     reset,
-  } = useAnalysis();
+  } = useAnalysisContext();
+
+  React.useEffect(() => {
+    // Jika user explicitly memilih mode dari Beranda (?mode=xxx)
+    // yang berbeda dari mode di riwayat (contextMode), reset state.
+    if (queryMode && contextMode && queryMode !== contextMode) {
+      reset();
+    }
+  }, [queryMode, contextMode, reset]);
+
+  // activeMode = prioritas query URL > prioritas context > default 'plant'
+  const activeMode = queryMode || contextMode || 'plant';
+  const config = MODE_CONFIG[activeMode] || MODE_CONFIG.plant;
+  const mode = activeMode;
 
   /**
    * Cek apakah semua foto yang dibutuhkan sudah ada
@@ -80,6 +92,22 @@ export default function Analysis() {
     if (config.needsLabel && !labelImage) return false;
     return true;
   }, [config, plantImage, labelImage]);
+
+  /**
+   * URL preview untuk animasi scanning (memoized agar tidak bocor memory)
+   */
+  const scanPreviewUrl = useMemo(() => {
+    const file = plantImage || labelImage;
+    if (!file) return null;
+    return URL.createObjectURL(file);
+  }, [plantImage, labelImage]);
+
+  // Cleanup URL saat berubah
+  React.useEffect(() => {
+    return () => {
+      if (scanPreviewUrl) URL.revokeObjectURL(scanPreviewUrl);
+    };
+  }, [scanPreviewUrl]);
 
   /**
    * Submit analisis
@@ -128,8 +156,14 @@ export default function Analysis() {
   return (
     <div className="min-h-screen bg-[var(--color-bg)]">
 
-      {/* Loading overlay */}
-      {isProcessing && <LoadingState mode={mode} />}
+      {/* Loading overlay with scanning animation */}
+      {isProcessing && (
+        <LoadingState
+          mode={mode}
+          imageUrl={scanPreviewUrl}
+          onCancel={cancelAnalysis}
+        />
+      )}
 
       {/* Error overlay */}
       {isError && error && (
@@ -160,7 +194,7 @@ export default function Analysis() {
             <ArrowLeft size={20} className="text-gray-600" />
           </button>
           <div className="flex items-center gap-2">
-            <ModeIcon size={20} className={config.color} />
+            <img src="/logo/logo_2.svg" alt="" className="w-6 h-6 object-contain" />
             <h1 className="text-lg font-bold text-gray-900">{config.title}</h1>
           </div>
         </div>
@@ -215,6 +249,36 @@ export default function Analysis() {
         {/* === RESULT STATE === */}
         {isSuccess && result && (
           <div className="space-y-4 animate-fade-in">
+
+            {/* Foto yang dianalisis */}
+            {scanPreviewUrl && (
+              <div className="card overflow-hidden p-0">
+                <div className="relative aspect-[16/10] bg-gray-100">
+                  <img
+                    src={scanPreviewUrl}
+                    alt="Foto yang dianalisis"
+                    className="w-full h-full object-cover"
+                  />
+                  {/* Gradient overlay bawah */}
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent" />
+                  {/* Badge mode di atas foto */}
+                  <div className="absolute top-3 left-3">
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 
+                                     bg-white/90 backdrop-blur-sm rounded-lg text-xs font-semibold text-gray-700 shadow-sm">
+                      <img src="/logo/logo_2.svg" alt="" className="w-3.5 h-3.5" />
+                      {config.title}
+                    </span>
+                  </div>
+                  {/* Status badge */}
+                  <div className="absolute bottom-3 left-3">
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 
+                                     bg-green-500/90 backdrop-blur-sm rounded-lg text-xs font-semibold text-white">
+                      ✓ Analisis Selesai
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Diagnosis card (mode: plant, both) */}
             {result.diagnosis && (

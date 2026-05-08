@@ -70,15 +70,7 @@ export default function Home() {
       {/* Hero section */}
       <div className="text-center mb-8">
         {/* Logo */}
-        <div className="inline-flex items-center justify-center w-16 h-16 
-                        rounded-2xl bg-gradient-to-br from-primary to-emerald-600 
-                        shadow-lg shadow-primary/25 mb-4">
-          <Leaf size={32} className="text-white" />
-        </div>
-
-        <h1 className="text-2xl font-bold text-gray-900 mb-1">
-          LeafGuard Tani
-        </h1>
+        <img src="/logo/logo_1.svg" alt="LeafGuard Tani" className="h-32 mx-auto mb-2" />
         <p className="text-sm text-gray-500 leading-relaxed max-w-xs mx-auto">
           Deteksi penyakit tanaman padi dan interpretasi label produk pertanian — cukup dari foto.
         </p>

@@ -10,10 +10,7 @@ export default function Profile() {
     <div className="px-5 py-6 pb-safe-nav">
       {/* Header */}
       <div className="flex flex-col items-center mb-8">
-        <div className="w-20 h-20 rounded-full bg-primary-light flex items-center justify-center mb-3">
-          <Leaf size={36} className="text-primary" />
-        </div>
-        <h1 className="text-xl font-bold text-gray-900">LeafGuard Tani</h1>
+        <img src="/logo/logo_1.svg" alt="LeafGuard Tani" className="h-28 mx-auto mb-2" />
         <p className="text-xs text-gray-400 mt-1">Versi 1.0.0</p>
       </div>
 
