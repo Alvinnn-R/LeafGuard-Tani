@@ -12,10 +12,14 @@ Ref: prompts.md v1.0.0, Buku Saku Penyakit Padi (BBPOPT 2020)
 # Model fallback chain — dicoba berurutan dari atas.
 # Jika model pertama gagal (rate limit, 404, timeout), coba model berikutnya.
 MODEL_CHAIN = [
-    "gemini-2.5-flash",         # Utama — cepat, multimodal, free tier
-    "gemini-2.5-flash-lite",    # Fallback 1 — lebih ringan
-    "gemini-2.0-flash",         # Fallback 2 — generasi sebelumnya
-    "gemini-2.0-flash-lite",    # Fallback 3 — paling ringan
+    "gemini-2.5-flash",              # Utama — cepat, multimodal, free tier
+    "gemini-2.5-pro",                # Fallback 1 — paling akurat, reasoning kuat
+    "gemini-2.5-flash-lite",         # Fallback 2 — lebih ringan
+    "gemini-3.1-flash-lite",         # Fallback 3 — generasi terbaru, ringan
+    "gemini-3.1-flash-lite-preview", # Fallback 4 — preview terbaru
+    "gemini-3-flash-preview",        # Fallback 5 — gen 3 preview
+    "gemini-2.0-flash",              # Fallback 6 — generasi sebelumnya
+    "gemini-2.0-flash-lite",         # Fallback 7 — paling ringan
 ]
 
 # Legacy single model (dipakai sebagai default awal)
