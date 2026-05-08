@@ -30,6 +30,8 @@ from prompts.system import (
     DISCLAIMER,
     GENERATION_CONFIG,
     MODEL_CHAIN,
+    PREVALIDATION_CONFIG,
+    get_prevalidation_prompt,
     get_system_prompt,
 )
 
@@ -282,6 +284,71 @@ async def _call_gemini_with_fallback(
 
 
 # ============================================================
+# Pre-validation — Skrining cepat sebelum analisis berat
+# ============================================================
+
+async def _prevalidate_image(
+    image_bytes: bytes,
+    image_mime: str,
+    image_type: str,  # "plant" atau "label"
+) -> bool:
+    """Skrining cepat apakah gambar valid (tanaman padi / label produk).
+
+    Menggunakan prompt ringan dan max_output_tokens kecil (128)
+    supaya respons sangat cepat (~1-2 detik vs 10+ detik full analysis).
+
+    Returns:
+        True jika gambar valid, False jika bukan.
+    """
+    gemini_client = _get_client()
+    prevalidation_prompt = get_prevalidation_prompt(image_type)
+
+    gen_config = types.GenerateContentConfig(
+        system_instruction=prevalidation_prompt,
+        temperature=PREVALIDATION_CONFIG["temperature"],
+        top_p=PREVALIDATION_CONFIG["top_p"],
+        max_output_tokens=PREVALIDATION_CONFIG["max_output_tokens"],
+        response_mime_type=PREVALIDATION_CONFIG["response_mime_type"],
+    )
+
+    content_parts = [
+        types.Part.from_bytes(data=image_bytes, mime_type=image_mime),
+        "Apakah ini foto yang valid? Jawab dalam JSON.",
+    ]
+
+    # Coba hanya model utama (tercepat) untuk pre-validation
+    # Tidak perlu fallback chain — ini hanya skrining awal
+    for model_name in MODEL_CHAIN[:3]:  # Coba max 3 model saja
+        try:
+            logger.info(f"Pre-validation with model: {model_name}")
+            response = await gemini_client.aio.models.generate_content(
+                model=model_name,
+                contents=content_parts,
+                config=gen_config,
+            )
+
+            if not response.text:
+                continue
+
+            result = json.loads(response.text)
+            is_valid = result.get("valid", True)  # Default True agar tidak false-reject
+            logger.info(f"Pre-validation result: valid={is_valid} (model: {model_name})")
+            return is_valid
+
+        except Exception as e:
+            logger.warning(f"Pre-validation failed with {model_name}: {e}")
+            if _is_retryable_error(e):
+                continue
+            # Non-retryable: skip pre-validation, lanjut ke analysis
+            logger.warning("Pre-validation skipped due to non-retryable error")
+            return True  # Anggap valid, biar full analysis yang putuskan
+
+    # Jika semua model pre-validation gagal, skip saja
+    logger.warning("All pre-validation models failed, skipping pre-validation")
+    return True  # Anggap valid agar tidak memblokir user
+
+
+# ============================================================
 # Main Analysis Function
 # ============================================================
 
@@ -312,6 +379,30 @@ async def analyze_image(
     content_parts = _build_content_parts(
         mode, plant_bytes, plant_mime, label_bytes, label_mime
     )
+
+    # === Step 0: Pre-validation — skrining cepat gambar ===
+    # Tolak gambar non-padi/non-label SEBELUM menjalankan prompt berat
+    if mode in ("plant", "both") and plant_bytes:
+        is_valid_plant = await _prevalidate_image(
+            plant_bytes, plant_mime or "image/jpeg", "plant"
+        )
+        if not is_valid_plant:
+            logger.info("Pre-validation rejected plant image (not rice plant)")
+            raise GeminiError(
+                code="INVALID_IMAGE",
+                message="Unggah foto daun, batang, atau malai tanaman padi yang cukup jelas dan terang.",
+            )
+
+    if mode in ("label", "both") and label_bytes:
+        is_valid_label = await _prevalidate_image(
+            label_bytes, label_mime or "image/jpeg", "label"
+        )
+        if not is_valid_label:
+            logger.info("Pre-validation rejected label image (not agricultural label)")
+            raise GeminiError(
+                code="INVALID_IMAGE",
+                message="Unggah foto label kemasan pestisida atau pupuk pertanian.",
+            )
 
     # === Step 1: Panggil Gemini API dengan fallback ===
     response_text = await _call_gemini_with_fallback(system_prompt, content_parts)

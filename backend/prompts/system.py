@@ -32,11 +32,37 @@ GENERATION_CONFIG = {
     "response_mime_type": "application/json",  # Force JSON output
 }
 
+# Config untuk pre-validation — sangat ringan, output minimal
+PREVALIDATION_CONFIG = {
+    "temperature": 0.0,
+    "top_p": 0.5,
+    "max_output_tokens": 128,  # Hanya perlu {"valid": true/false}
+    "response_mime_type": "application/json",
+}
+
 # ============================================================
 # Disclaimer — HARDCODED, tidak boleh diubah atau dihilangkan
 # ============================================================
 
 DISCLAIMER = "Hasil ini adalah diagnosa awal berdasarkan Buku Saku Penyakit Padi (BBPOPT 2020). Konfirmasikan dengan petugas lapangan atau penyuluh pertanian setempat untuk penanganan lanjutan."
+
+# ============================================================
+# Pre-validation Prompt — Skrining cepat sebelum analisis berat
+# ============================================================
+
+PLANT_PREVALIDATION_PROMPT = """Kamu adalah filter gambar cepat.
+TUGAS: Tentukan apakah foto ini menunjukkan tanaman padi (daun, batang, malai, atau bagian tanaman padi lainnya).
+Jawab HANYA dengan JSON:
+- Jika ya (tanaman padi): {"valid": true}
+- Jika bukan tanaman padi, atau foto terlalu buram/gelap: {"valid": false}
+Tidak perlu penjelasan. JSON saja."""
+
+LABEL_PREVALIDATION_PROMPT = """Kamu adalah filter gambar cepat.
+TUGAS: Tentukan apakah foto ini menunjukkan label kemasan produk pertanian (pestisida, pupuk, herbisida, dll).
+Jawab HANYA dengan JSON:
+- Jika ya (label produk pertanian): {"valid": true}
+- Jika bukan label produk pertanian, atau foto terlalu buram/gelap: {"valid": false}
+Tidak perlu penjelasan. JSON saja."""
 
 # ============================================================
 # System Prompt — Mode: Plant Analysis (Buku Saku BBPOPT 2020)
@@ -306,3 +332,20 @@ def get_system_prompt(mode: str) -> str:
         raise ValueError(f"Mode tidak valid: {mode}. Gunakan 'plant', 'label', atau 'both'.")
 
     return prompts[mode]
+
+
+def get_prevalidation_prompt(image_type: str) -> str:
+    """Ambil pre-validation prompt berdasarkan tipe gambar.
+
+    Args:
+        image_type: "plant" | "label"
+
+    Returns:
+        Pre-validation prompt string yang ringan.
+    """
+    if image_type == "plant":
+        return PLANT_PREVALIDATION_PROMPT
+    elif image_type == "label":
+        return LABEL_PREVALIDATION_PROMPT
+    else:
+        return PLANT_PREVALIDATION_PROMPT  # Default ke plant
