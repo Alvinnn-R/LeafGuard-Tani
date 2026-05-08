@@ -24,7 +24,7 @@ import { getMockResult } from '../mocks/sampleData';
  * Apakah menggunakan mock data (true) atau real API (false).
  * Toggle ini saat backend sudah siap.
  */
-const USE_MOCK = true;
+const USE_MOCK = false;
 const MOCK_DELAY_MS = 2500;
 
 export default function useAnalysis() {
