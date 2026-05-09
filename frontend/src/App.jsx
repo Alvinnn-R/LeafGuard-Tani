@@ -8,6 +8,7 @@ import Analysis from './pages/Analysis';
 
 const History = lazy(() => import('./pages/History'));
 const Profile = lazy(() => import('./pages/Profile'));
+const Guide = lazy(() => import('./pages/Guide'));
 
 /**
  * Konfigurasi item navigasi bottom bar
@@ -113,6 +114,7 @@ function AppLayout() {
             <Route path="/analyze" element={<Analysis />} />
             <Route path="/history" element={<History />} />
             <Route path="/profile" element={<Profile />} />
+            <Route path="/guide" element={<Guide />} />
           </Routes>
         </Suspense>
       </main>

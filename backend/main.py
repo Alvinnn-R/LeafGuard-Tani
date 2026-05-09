@@ -17,6 +17,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from routers.analyze import router as analyze_router
+from routers.history import router as history_router
 
 # Load .env file (development only, Cloud Run uses env vars langsung)
 load_dotenv()
@@ -55,6 +56,7 @@ app.add_middleware(
 # ============================================================
 
 app.include_router(analyze_router)
+app.include_router(history_router)
 
 
 # ============================================================
