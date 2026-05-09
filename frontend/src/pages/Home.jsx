@@ -126,6 +126,27 @@ export default function Home() {
         })}
       </div>
 
+      {/* Guide Banner */}
+      <button
+        onClick={() => navigate('/guide')}
+        className="w-full card bg-primary-lt border-primary-100 flex items-center justify-between p-4 mb-6 active:scale-[0.98] transition-transform"
+      >
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-full bg-white flex items-center justify-center flex-shrink-0 shadow-sm text-primary">
+            <span className="text-xl">📖</span>
+          </div>
+          <div className="text-left">
+            <h3 className="text-sm font-bold text-primary mb-0.5">Cara Penggunaan</h3>
+            <p className="text-xs text-green-700">Pelajari cara memakai LeafGuard</p>
+          </div>
+        </div>
+        <div className="text-primary-300">
+          <svg width="8" height="14" viewBox="0 0 8 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M1 1L7 7L1 13" />
+          </svg>
+        </div>
+      </button>
+
       {/* Photo tips */}
       <div className="bg-amber-50 border border-amber-100 rounded-2xl p-4">
         <h3 className="text-sm font-semibold text-amber-800 mb-3">

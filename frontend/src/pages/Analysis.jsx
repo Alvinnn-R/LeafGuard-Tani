@@ -177,28 +177,29 @@ export default function Analysis() {
       )}
 
       {/* Main content */}
-      <div className="px-5 py-4 pb-safe-nav">
-
+      <div className="pb-safe-nav">
         {/* Header bar */}
-        <div className="flex items-center gap-3 mb-6">
-          <button
-            type="button"
-            onClick={handleBack}
-            className="w-10 h-10 rounded-xl bg-white border border-gray-200 
-                       flex items-center justify-center
-                       hover:bg-gray-50 active:scale-95 
-                       transition-all duration-200
-                       min-h-[44px] min-w-[44px]"
-            aria-label="Kembali ke beranda"
-          >
-            <ArrowLeft size={20} className="text-gray-600" />
-          </button>
-          <div className="flex items-center gap-2">
-            <img src="/logo/logo_2.svg" alt="" className="w-6 h-6 object-contain" />
-            <h1 className="text-lg font-bold text-gray-900">{config.title}</h1>
+        <div className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-gray-100 px-5 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={handleBack}
+              className="w-10 h-10 rounded-xl bg-white border border-gray-200 
+                         flex items-center justify-center
+                         hover:bg-gray-50 active:scale-95 transition-all
+                         flex-shrink-0"
+              aria-label="Kembali ke beranda"
+            >
+              <ArrowLeft size={20} className="text-gray-600" />
+            </button>
+            <div className="flex items-center gap-2">
+              <img src="/logo/logo_2.svg" alt="" className="w-6 h-6 object-contain" />
+              <h1 className="text-lg font-bold text-gray-900">{config.title}</h1>
+            </div>
           </div>
         </div>
 
+        <div className="px-5 py-4">
         {/* === UPLOAD STATE === */}
         {isIdle && (
           <div className="animate-fade-in">
@@ -318,6 +319,7 @@ export default function Analysis() {
             </div>
           </div>
         )}
+        </div>
       </div>
     </div>
   );

@@ -10,21 +10,12 @@ Ref: prompts.md v1.0.0, Buku Saku Penyakit Padi (BBPOPT 2020)
 # ============================================================
 
 # Model fallback chain — dicoba berurutan dari atas.
-# Jika model pertama gagal (rate limit, 404, timeout), coba model berikutnya.
-# CATATAN: Setiap model punya quota TERPISAH (20 req/hari free tier).
-#          Dengan 7 model = 140 request/hari total.
-#          gemini-2.5-pro TIDAK termasuk (limit=0 di free tier).
+# HANYA model yang sudah terverifikasi tersedia di Gemini API free tier.
 MODEL_CHAIN = [
-    "gemini-2.5-flash",              # Utama — 20 req/hari
-    "gemini-2.5-flash-lite",         # Fallback 1 — 20 req/hari
-    "gemini-2.0-flash",              # Fallback 2 — 20 req/hari
-    "gemini-2.0-flash-lite",         # Fallback 3 — 20 req/hari
-    "gemini-3.1-flash-lite",         # Fallback 4 — 20 req/hari
-    "gemini-3.1-flash-lite-preview", # Fallback 5 — 20 req/hari
-    "gemini-3-flash-preview",        # Fallback 6 — 20 req/hari
-    "gemini-2.5-pro",         # Fallback 3 — 20 req/hari
-    "gemini-1.5-flash",              # Fallback 2 — Paling stabil & kuota besar di free tier
-    "gemini-1.5-flash-8b",           # Fallback 3 — Ringan, sangat stabil
+    "gemini-2.5-flash",              # Utama — CONFIRMED WORKING
+    "gemini-2.0-flash",              # Fallback 1 — baru, stabil
+    "gemini-2.0-flash-lite",         # Fallback 2 — ringan
+    "gemini-2.5-flash-lite",         # Fallback 3
 ]
 
 # Legacy single model (dipakai sebagai default awal)

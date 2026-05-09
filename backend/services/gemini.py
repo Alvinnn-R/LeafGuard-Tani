@@ -15,6 +15,7 @@ Ref: prompts.md v1.0.0, data-model.md v1.0.0, Buku Saku BBPOPT 2020
 import json
 import logging
 import os
+import re
 import time
 
 from google import genai
@@ -37,6 +38,47 @@ from prompts.system import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# ============================================================
+# JSON Cleaner — handle Gemini quirks
+# ============================================================
+
+def _clean_json_response(text: str) -> str:
+    """Bersihkan response Gemini agar bisa di-parse json.loads().
+
+    Gemini 2.5 Flash sering mengembalikan JSON yang tidak standar:
+    - Dibungkus markdown: ```json ... ```
+    - Trailing comma: {"key": "val",}
+    - Newline literal tidak di-escape di dalam string value
+    - Teks tambahan sebelum atau sesudah JSON
+    """
+    if not text:
+        return text
+
+    text = text.strip()
+
+    # 1. Strip markdown code block: ```json ... ``` atau ``` ... ```
+    if text.startswith('```'):
+        lines = text.split('\n')
+        lines = lines[1:]  # hapus baris ```json
+        if lines and lines[-1].strip().startswith('```'):
+            lines = lines[:-1]  # hapus baris penutup ```
+        text = '\n'.join(lines).strip()
+
+    # 2. Cari posisi awal JSON object/array
+    start = -1
+    for i, ch in enumerate(text):
+        if ch in ('{', '['):
+            start = i
+            break
+    if start > 0:
+        text = text[start:]
+
+    # 3. Hapus trailing comma sebelum } atau ] — common Gemini bug
+    text = re.sub(r',\s*([}\]])', r'\1', text)
+
+    return text.strip()
 
 
 # ============================================================
@@ -96,8 +138,10 @@ _RETRYABLE_ERROR_STRINGS = [
     "unavailable",
     "internal",
     "deadline exceeded",
-    "not found",           # model tidak tersedia
-    "not supported",       # model tidak support generateContent
+    "not found",           # model tidak tersedia di region/tier → coba model berikutnya
+    "not supported",       # model tidak support generateContent → coba model berikutnya
+    "404",                 # HTTP 404 model tidak ada → coba model berikutnya
+    "permission",          # model tidak diakses tier ini → coba model berikutnya
 ]
 
 
@@ -407,15 +451,40 @@ async def analyze_image(
     response_text = await _call_gemini_with_fallback(system_prompt, content_parts)
 
     # === Step 2: Parse JSON response ===
+    # Gemini 2.5 Flash sering return JSON tidak valid (trailing commas,
+    # unescaped newlines, unicode quotes, dll).
+    # Gunakan json_repair sebagai solusi universal untuk malformed LLM JSON.
+    cleaned = _clean_json_response(response_text)
+    result_data = None
+
+    # Strategi 1: strict JSON standar (paling cepat)
     try:
-        result_data = json.loads(response_text)
-    except (json.JSONDecodeError, ValueError) as e:
-        logger.error(f"Failed to parse Gemini JSON response: {e}")
-        logger.debug(f"Raw response: {response_text[:500]}")
+        result_data = json.loads(cleaned)
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    # Strategi 2: json_repair — fix semua quirks LLM JSON secara otomatis
+    if result_data is None:
+        try:
+            from json_repair import repair_json
+            repaired = repair_json(cleaned, return_objects=True)
+            if isinstance(repaired, dict) and repaired:
+                result_data = repaired
+                logger.warning("JSON parsed via json_repair (Gemini returned malformed JSON)")
+            elif isinstance(repaired, str) and repaired.strip() not in ('', '{}', '""'):
+                result_data = json.loads(repaired)
+                logger.warning("JSON parsed via json_repair string output")
+        except Exception as repair_err:
+            logger.error(f"json_repair also failed: {repair_err}")
+
+    if result_data is None:
+        logger.error(f"All JSON parse strategies failed")
+        logger.error(f"Raw response: {repr(response_text[:1000])}")
         raise GeminiError(
             code="AI_ERROR",
             message="Terjadi kesalahan saat menganalisis foto. Silakan coba lagi.",
         )
+
 
     # === Step 3: Cek apakah Gemini mengembalikan error (INVALID_IMAGE) ===
     if "error" in result_data:

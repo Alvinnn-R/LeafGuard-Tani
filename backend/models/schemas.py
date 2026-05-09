@@ -183,3 +183,51 @@ class ApiResponse(BaseModel):
     success: bool
     data: Optional[AnalysisResult] = None
     error: Optional[ApiError] = None
+
+
+# ============================================================
+# History Models — untuk GET /history endpoint
+# ============================================================
+
+class HistoryItem(BaseModel):
+    """Satu item riwayat analisis (tanpa result JSON penuh — untuk list view)."""
+    id: str
+    session_id: str
+    mode: str
+    created_at: str
+    plant_url: Optional[str] = None
+    label_url: Optional[str] = None
+    disease_name: Optional[str] = None
+    urgency: Optional[str] = None
+    product_name: Optional[str] = None
+
+
+class HistoryDetail(BaseModel):
+    """Detail lengkap 1 item riwayat termasuk result JSON."""
+    id: str
+    session_id: str
+    mode: str
+    created_at: str
+    plant_url: Optional[str] = None
+    label_url: Optional[str] = None
+    disease_name: Optional[str] = None
+    urgency: Optional[str] = None
+    product_name: Optional[str] = None
+    result: Optional[dict] = None
+
+
+class HistoryListResponse(BaseModel):
+    """Response untuk GET /history."""
+    success: bool
+    data: list[HistoryItem]
+    total: int
+    limit: int
+    offset: int
+
+
+class HistoryDetailResponse(BaseModel):
+    """Response untuk GET /history/{id}."""
+    success: bool
+    data: Optional[HistoryDetail] = None
+    error: Optional[ApiError] = None
+
