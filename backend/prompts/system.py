@@ -16,6 +16,9 @@ MODEL_CHAIN = [
     "gemini-2.0-flash",              # Fallback 1 — baru, stabil
     "gemini-2.0-flash-lite",         # Fallback 2 — ringan
     "gemini-2.5-flash-lite",         # Fallback 3
+    "gemini-3-flash-preview",        # Fallback 4
+    "gemini-3.1-flash-lite",         # Fallback 5
+    "gemini-3.1-flash-lite-preview", # Fallback 6
 ]
 
 # Legacy single model (dipakai sebagai default awal)
