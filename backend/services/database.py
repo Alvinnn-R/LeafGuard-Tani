@@ -1,6 +1,9 @@
 """
 database.py — Supabase Database service untuk menyimpan & mengambil riwayat analisis.
 
+Menggunakan httpx langsung ke Supabase PostgREST API.
+Package 'supabase' TIDAK digunakan karena dependency pyiceberg tidak kompatibel di Windows.
+
 Operasi:
   - save_history_async: Insert sesi analisis ke tabel history (fire-and-forget)
   - get_history: Ambil daftar riwayat (dengan pagination, filter per device)
@@ -9,36 +12,37 @@ Operasi:
 PENTING: save_history_async dipanggil via asyncio.create_task — tidak blocking response.
 """
 
+import json
 import logging
 import os
 from typing import Optional
 
+import httpx
+
 logger = logging.getLogger(__name__)
 
-_supabase_client = None
 TABLE_NAME = "history"
 
 
-def _get_client():
-    """Return Supabase client, buat jika belum ada (lazy init)."""
-    global _supabase_client
-    if _supabase_client is not None:
-        return _supabase_client
-
-    url = os.getenv("SUPABASE_URL", "")
+def _get_supabase_config() -> tuple[str, str] | None:
+    """Return (url, key) jika configured, None jika tidak."""
+    url = os.getenv("SUPABASE_URL", "").rstrip("/")
     key = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
-
     if not url or not key:
-        logger.warning("Supabase credentials not configured — database operations disabled.")
         return None
+    return url, key
 
-    try:
-        from supabase import create_client
-        _supabase_client = create_client(url, key)
-        return _supabase_client
-    except Exception as e:
-        logger.error(f"Failed to initialize Supabase client for DB: {e}")
-        return None
+
+def _build_headers(key: str, extra: dict | None = None) -> dict:
+    """Build standard Supabase PostgREST headers."""
+    headers = {
+        "apikey": key,
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json",
+    }
+    if extra:
+        headers.update(extra)
+    return headers
 
 
 async def save_history_async(
@@ -65,10 +69,12 @@ async def save_history_async(
         True jika berhasil, False jika gagal.
     """
     try:
-        client = _get_client()
-        if client is None:
+        config = _get_supabase_config()
+        if config is None:
             logger.warning("[DB] Supabase not configured — skip save history.")
             return False
+
+        url, key = config
 
         # Ekstrak field denormalized untuk query cepat di frontend
         disease_name = None
@@ -94,7 +100,20 @@ async def save_history_async(
             "product_name": product_name,
         }
 
-        client.table(TABLE_NAME).insert(row).execute()
+        # POST ke PostgREST API
+        # https://supabase.com/docs/guides/api#inserting
+        api_url = f"{url}/rest/v1/{TABLE_NAME}"
+        headers = _build_headers(key, {"Prefer": "return=minimal"})
+
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                api_url,
+                json=row,
+                headers=headers,
+                timeout=10.0,
+            )
+            response.raise_for_status()
+
         logger.info(
             f"[DB] History saved — session: {session_id}, mode: {mode}, "
             f"device: {device_id or 'none'}, "
@@ -103,6 +122,9 @@ async def save_history_async(
         )
         return True
 
+    except httpx.HTTPStatusError as e:
+        logger.error(f"[DB] save_history_async HTTP error: {e.response.status_code} - {e.response.text}")
+        return False
     except Exception as e:
         logger.error(f"[DB] save_history_async failed (non-blocking): {e}")
         return False
@@ -124,34 +146,45 @@ def get_history(
         List of history items, terbaru di depan. Empty list jika gagal.
     """
     try:
-        client = _get_client()
-        if client is None:
+        config = _get_supabase_config()
+        if config is None:
             logger.warning("[DB] Supabase not configured — returning empty history.")
             return []
 
-        limit = min(limit, 50)  # Batasi maksimal 50 per request
+        url, key = config
+        limit = min(limit, 50)
 
-        query = (
-            client.table(TABLE_NAME)
-            .select(
-                "id, session_id, mode, created_at, "
-                "plant_url, label_url, disease_name, urgency, product_name"
-            )
-        )
+        # GET dari PostgREST API dengan query params
+        # https://supabase.com/docs/guides/api#reading
+        api_url = f"{url}/rest/v1/{TABLE_NAME}"
+        headers = _build_headers(key)
+
+        # Select hanya kolom yang dibutuhkan untuk list
+        params = {
+            "select": "id,session_id,mode,created_at,plant_url,label_url,disease_name,urgency,product_name",
+            "order": "created_at.desc",
+            "offset": str(offset),
+            "limit": str(limit),
+        }
 
         # Filter per device jika device_id diberikan
         if device_id:
-            query = query.eq("device_id", device_id)
+            params["device_id"] = f"eq.{device_id}"
 
-        response = (
-            query
-            .order("created_at", desc=True)
-            .range(offset, offset + limit - 1)
-            .execute()
-        )
+        with httpx.Client() as client:
+            response = client.get(
+                api_url,
+                headers=headers,
+                params=params,
+                timeout=10.0,
+            )
+            response.raise_for_status()
 
-        return response.data or []
+        return response.json()
 
+    except httpx.HTTPStatusError as e:
+        logger.error(f"[DB] get_history HTTP error: {e.response.status_code} - {e.response.text}")
+        return []
     except Exception as e:
         logger.error(f"[DB] get_history failed: {e}")
         return []
@@ -167,20 +200,40 @@ def get_history_by_id(history_id: str) -> Optional[dict]:
         Dict item riwayat lengkap (termasuk result JSON), atau None jika tidak ditemukan.
     """
     try:
-        client = _get_client()
-        if client is None:
+        config = _get_supabase_config()
+        if config is None:
             return None
 
-        response = (
-            client.table(TABLE_NAME)
-            .select("*")
-            .eq("id", history_id)
-            .single()
-            .execute()
-        )
+        url, key = config
 
-        return response.data
+        # GET single row by id
+        api_url = f"{url}/rest/v1/{TABLE_NAME}"
+        headers = _build_headers(key, {"Accept": "application/vnd.pgrst.object+json"})
 
+        params = {
+            "select": "*",
+            "id": f"eq.{history_id}",
+        }
+
+        with httpx.Client() as client:
+            response = client.get(
+                api_url,
+                headers=headers,
+                params=params,
+                timeout=10.0,
+            )
+
+            # 406 = row not found (PostgREST single-object mode)
+            if response.status_code == 406:
+                return None
+
+            response.raise_for_status()
+
+        return response.json()
+
+    except httpx.HTTPStatusError as e:
+        logger.error(f"[DB] get_history_by_id HTTP error for id={history_id}: {e.response.status_code}")
+        return None
     except Exception as e:
         logger.error(f"[DB] get_history_by_id failed for id={history_id}: {e}")
         return None

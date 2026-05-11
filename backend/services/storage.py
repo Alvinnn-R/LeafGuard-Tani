@@ -1,6 +1,9 @@
 """
 storage.py — Async image upload service ke Supabase Storage (fire-and-forget).
 
+Menggunakan httpx langsung ke Supabase Storage REST API.
+Package 'supabase' TIDAK digunakan karena dependency pyiceberg tidak kompatibel di Windows.
+
 PENTING: Upload TIDAK BOLEH blocking response — selalu fire-and-forget via asyncio.create_task.
 Ref: CLAUDE.md §6, plan.md §Architecture
 """
@@ -9,33 +12,9 @@ import logging
 import os
 import uuid
 
+import httpx
+
 logger = logging.getLogger(__name__)
-
-# Lazy-init Supabase client agar tidak crash saat .env belum diisi
-_supabase_client = None
-
-
-def _get_client():
-    """Return Supabase client, buat jika belum ada."""
-    global _supabase_client
-    if _supabase_client is not None:
-        return _supabase_client
-
-    url = os.getenv("SUPABASE_URL", "")
-    key = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
-
-    if not url or not key:
-        logger.warning("Supabase credentials not configured — storage upload disabled.")
-        return None
-
-    try:
-        from supabase import create_client
-        _supabase_client = create_client(url, key)
-        logger.info("Supabase client initialized.")
-        return _supabase_client
-    except Exception as e:
-        logger.error(f"Failed to initialize Supabase client: {e}")
-        return None
 
 
 async def upload_image_async(
@@ -61,28 +40,46 @@ async def upload_image_async(
     if not session_id:
         session_id = uuid.uuid4().hex[:12]
 
+    supabase_url = os.getenv("SUPABASE_URL", "").rstrip("/")
+    supabase_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
     bucket = os.getenv("SUPABASE_BUCKET", "images")
+
+    if not supabase_url or not supabase_key:
+        logger.warning("[STORAGE] Supabase credentials not configured — skip upload.")
+        return None
+
     path = f"sessions/{session_id}/{image_type}.jpg"
 
+    # Supabase Storage REST API endpoint
+    # https://supabase.com/docs/guides/storage/uploads
+    upload_url = f"{supabase_url}/storage/v1/object/{bucket}/{path}"
+
+    headers = {
+        "apikey": supabase_key,
+        "Authorization": f"Bearer {supabase_key}",
+        "Content-Type": "image/jpeg",
+        "x-upsert": "true",
+    }
+
     try:
-        client = _get_client()
-        if client is None:
-            logger.warning(f"[STORAGE] Supabase not configured — skip upload: {path}")
-            return None
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                upload_url,
+                content=image_bytes,
+                headers=headers,
+                timeout=15.0,
+            )
+            response.raise_for_status()
 
-        # Upload ke Supabase Storage
-        client.storage.from_(bucket).upload(
-            path=path,
-            file=image_bytes,
-            file_options={"content-type": "image/jpeg", "upsert": "true"},
-        )
-
-        # Ambil public URL
-        public_url = client.storage.from_(bucket).get_public_url(path)
+        # Generate public URL
+        public_url = f"{supabase_url}/storage/v1/object/public/{bucket}/{path}"
 
         logger.info(f"[STORAGE] Upload success — {path} ({len(image_bytes)} bytes)")
         return public_url
 
+    except httpx.HTTPStatusError as e:
+        logger.error(f"[STORAGE] Upload HTTP error: {e.response.status_code} - {e.response.text}")
+        return None
     except Exception as e:
         # Upload gagal TIDAK boleh crash — graceful degradation
         logger.error(f"[STORAGE] Upload failed (non-blocking): {e}")
