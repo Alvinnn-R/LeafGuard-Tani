@@ -49,6 +49,18 @@ export default function UploadZone({
   const [error, setError] = useState(null);
   const [dragActive, setDragActive] = useState(false);
 
+  // Sinkronisasi prop 'value' dengan state 'preview'
+  // Berguna ketika komponen di-remount (misal setelah cancel loading)
+  useEffect(() => {
+    if (value) {
+      const url = URL.createObjectURL(value);
+      setPreview(url);
+      return () => URL.revokeObjectURL(url);
+    } else {
+      setPreview(null);
+    }
+  }, [value]);
+
   // Webcam states (untuk desktop)
   const [showWebcam, setShowWebcam] = useState(false);
   const [webcamReady, setWebcamReady] = useState(false);
@@ -228,23 +240,11 @@ export default function UploadZone({
         processedFile = await imageCompression(file, COMPRESSION_OPTIONS);
       }
 
-      // Generate preview URL
-      const previewUrl = URL.createObjectURL(processedFile);
-      
-      // Cleanup previous preview URL
-      if (preview) {
-        URL.revokeObjectURL(preview);
-      }
-
-      setPreview(previewUrl);
       onChange(processedFile);
     } catch (err) {
       console.error('Gagal memproses foto:', err);
       // Fallback: gunakan file asli jika kompresi gagal dan file < 5MB
       if (file.size < 5 * 1024 * 1024) {
-        const previewUrl = URL.createObjectURL(file);
-        if (preview) URL.revokeObjectURL(preview);
-        setPreview(previewUrl);
         onChange(file);
       } else {
         setError('Gagal memproses foto. Coba foto dengan ukuran lebih kecil.');

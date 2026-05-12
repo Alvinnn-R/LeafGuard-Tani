@@ -123,7 +123,11 @@ async def save_history_async(
         return True
 
     except httpx.HTTPStatusError as e:
-        logger.error(f"[DB] save_history_async HTTP error: {e.response.status_code} - {e.response.text}")
+        logger.error(
+            f"[DB] save_history_async HTTP error: {e.response.status_code} - {e.response.text}\n"
+            f"     session_id={session_id}, mode={mode}, device_id={device_id}\n"
+            f"     disease_name={disease_name}, urgency={urgency}, product_name={product_name}"
+        )
         return False
     except Exception as e:
         logger.error(f"[DB] save_history_async failed (non-blocking): {e}")

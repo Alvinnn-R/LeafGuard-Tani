@@ -52,9 +52,11 @@ export default function Profile() {
       </div>
 
       {/* Footer */}
-      <p className="text-xs text-gray-400 text-center mt-8">
-        Dibuat untuk Mini Hackathon ANTIGRAVITY — GDG Surabaya 2026
-      </p>
+      <div className="text-xs text-gray-400 text-center mt-8 space-y-1">
+        <p>&copy; 2026 Wahyu Setiawan & Alvin Rama Saputra</p>
+        <p className="font-medium">Team Nasi Goreng Pak Kadir</p>
+        <p className="pt-2">Hackathon ANTIGRAVITY — GDG Surabaya 2026</p>
+      </div>
       </div>
     </div>
   );

@@ -9,7 +9,8 @@ import { Search, FlaskConical, ClipboardCheck, Sparkles, Leaf, XCircle } from 'l
  *
  * @param {Object} props
  * @param {string} [props.mode="plant"] - Mode analisis ("plant" | "label" | "both")
- * @param {string|null} [props.imageUrl] - URL preview foto untuk animasi scanning
+ * @param {string|null} [props.imageUrl] - URL preview foto tanaman untuk animasi scanning
+ * @param {string|null} [props.labelImageUrl] - URL preview foto label (untuk mode "both")
  * @param {Function} [props.onCancel] - Callback saat tombol batal diklik
  */
 
@@ -37,10 +38,28 @@ const MESSAGES = {
 
 const ROTATION_INTERVAL_MS = 2800;
 
-export default function LoadingState({ mode = 'plant', imageUrl = null, onCancel }) {
+export default function LoadingState({ mode = 'plant', imageUrl = null, labelImageUrl = null, onCancel }) {
   const [activeIndex, setActiveIndex] = useState(0);
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [activeImageIdx, setActiveImageIdx] = useState(0); // 0 = plant, 1 = label
+
+  // Untuk mode "both": bergantian foto tanaman ↔ label setiap 3 detik
+  const hasDualImages = mode === 'both' && imageUrl && labelImageUrl;
+  useEffect(() => {
+    if (!hasDualImages) return;
+    const interval = setInterval(() => {
+      setActiveImageIdx((prev) => (prev === 0 ? 1 : 0));
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [hasDualImages]);
+
+  const currentImageUrl = hasDualImages
+    ? (activeImageIdx === 0 ? imageUrl : labelImageUrl)
+    : (imageUrl || labelImageUrl);
+  const currentImageLabel = hasDualImages
+    ? (activeImageIdx === 0 ? '🌿 Tanaman' : '🏷️ Label')
+    : null;
 
   const messages = MESSAGES[mode] || MESSAGES.plant;
 
@@ -76,29 +95,42 @@ export default function LoadingState({ mode = 'plant', imageUrl = null, onCancel
   }, [elapsedSeconds]);
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-gray-950/95 backdrop-blur-md">
+    <div className="fixed inset-0 z-50 flex flex-col bg-white/90 backdrop-blur-md">
 
       {/* ============================================ */}
       {/* TOP SECTION: Scanning Image Preview */}
       {/* ============================================ */}
       <div className="flex-1 flex items-center justify-center px-6 pt-10">
-        <div className="relative w-full max-w-[320px] aspect-[3/4] rounded-2xl overflow-hidden shadow-2xl shadow-primary/20">
+        <div className="relative w-full max-w-[320px] md:max-w-[260px] lg:max-w-[240px] aspect-[3/4] rounded-2xl overflow-hidden shadow-2xl shadow-primary/20">
 
           {/* Image or Placeholder */}
-          {imageUrl ? (
+          {currentImageUrl ? (
             <img
-              src={imageUrl}
+              key={currentImageUrl}
+              src={currentImageUrl}
               alt="Foto sedang dianalisis"
-              className="w-full h-full object-cover"
+              className="w-full h-full object-cover animate-fade-in"
             />
           ) : (
-            <div className="w-full h-full bg-gradient-to-br from-gray-800 to-gray-900 flex items-center justify-center">
+            <div className="w-full h-full bg-gray-100 flex items-center justify-center">
               <img src="/logo/logo_2.svg" alt="" className="w-20 h-20 opacity-20" />
             </div>
           )}
 
           {/* Dark overlay */}
           <div className="absolute inset-0 bg-black/30" />
+
+          {/* Badge foto aktif (mode both) */}
+          {currentImageLabel && (
+            <div className="absolute top-3 right-3 z-10">
+              <span className="inline-flex items-center px-2.5 py-1
+                               bg-white/90 backdrop-blur-sm rounded-lg
+                               text-[10px] font-bold text-gray-700 shadow-sm
+                               transition-all duration-300">
+                {currentImageLabel}
+              </span>
+            </div>
+          )}
 
           {/* ======= SCANNING LINE ANIMATION ======= */}
           <div className="absolute inset-0 pointer-events-none overflow-hidden">
@@ -164,7 +196,7 @@ export default function LoadingState({ mode = 'plant', imageUrl = null, onCancel
             ${isTransitioning ? 'opacity-0 scale-75' : 'opacity-100 scale-100'}`}>
             <ActiveIcon size={20} className="text-green-400" strokeWidth={2} />
           </div>
-          <p className={`text-sm font-medium text-white transition-all duration-300 ease-out
+          <p className={`text-sm font-medium text-gray-800 transition-all duration-300 ease-out
             ${isTransitioning ? 'opacity-0 translate-y-2' : 'opacity-100 translate-y-0'}`}>
             {currentMessage.text}
           </p>
@@ -172,7 +204,7 @@ export default function LoadingState({ mode = 'plant', imageUrl = null, onCancel
 
         {/* Progress bar */}
         <div className="w-full max-w-[280px] mx-auto mb-2">
-          <div className="h-1 bg-white/10 rounded-full overflow-hidden">
+          <div className="h-1 bg-gray-200 rounded-full overflow-hidden">
             <div
               className="h-full rounded-full transition-all duration-700 ease-out
                          bg-gradient-to-r from-green-500 to-emerald-400"
@@ -191,7 +223,7 @@ export default function LoadingState({ mode = 'plant', imageUrl = null, onCancel
                   ? 'bg-green-400 w-5'
                   : idx < activeIndex
                     ? 'bg-green-400/40 w-1.5'
-                    : 'bg-white/15 w-1.5'
+                    : 'bg-gray-300 w-1.5'
                 }`}
             />
           ))}
@@ -204,11 +236,10 @@ export default function LoadingState({ mode = 'plant', imageUrl = null, onCancel
             onClick={onCancel}
             className="mx-auto flex items-center justify-center gap-2
                        px-6 py-3 rounded-xl text-sm font-semibold
-                       text-red-300 bg-red-500/15 border border-red-500/25
-                       hover:bg-red-500/25 hover:text-red-200
+                       text-red-600 bg-red-50 border border-red-100
+                       hover:bg-red-100 hover:text-red-700
                        active:scale-95 transition-all duration-200
-                       min-h-[44px] min-w-[44px]
-                       backdrop-blur-sm"
+                       min-h-[44px] min-w-[44px]"
           >
             <XCircle size={18} />
             Batalkan Analisis
