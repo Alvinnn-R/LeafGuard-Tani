@@ -10,19 +10,32 @@ Ref: prompts.md v1.0.0, Buku Saku Penyakit Padi (BBPOPT 2020)
 # ============================================================
 
 # Model fallback chain — dicoba berurutan dari atas.
-# HANYA model yang sudah terverifikasi tersedia di Gemini API free tier.
+# Jika model pertama kena 429/error, otomatis coba model berikutnya.
 MODEL_CHAIN = [
-    "gemini-2.5-flash",              # Utama — CONFIRMED WORKING
-    "gemini-2.0-flash",              # Fallback 1 — baru, stabil
-    "gemini-2.0-flash-lite",         # Fallback 2 — ringan
-    "gemini-2.5-flash-lite",         # Fallback 3
-    "gemini-3-flash-preview",        # Fallback 4
-    "gemini-3.1-flash-lite",         # Fallback 5
-    "gemini-3.1-flash-lite-preview", # Fallback 6
+    "gemini-2.5-flash",              # Utama — paling stabil
+    "gemini-2.5-flash-lite",         # Fallback 1
+    "gemini-3-flash-preview",        # Fallback 2
+    "gemini-3.1-flash-lite",         # Fallback 3
+    "gemini-3.1-flash-lite-preview", # Fallback 4
+    "gemini-2.0-flash",              # Fallback 5
+    "gemini-2.0-flash-lite",         # Fallback 6 — ringan
 ]
 
-# Legacy single model (dipakai sebagai default awal)
+# Legacy single model (default)
 GEMINI_MODEL = MODEL_CHAIN[0]
+
+# Multi API Key Strategy
+# =====================
+# Setiap API key dari project GCP berbeda punya kuota terpisah (20 RPD per model).
+# Jika SEMUA model gagal di key pertama, otomatis pindah ke key berikutnya.
+#
+# Format di .env:
+#   GEMINI_API_KEY=key_utama
+#   GEMINI_API_KEY_2=key_cadangan_1
+#   GEMINI_API_KEY_3=key_cadangan_2
+#   (dst, bisa sampai GEMINI_API_KEY_10)
+#
+# Flow: Key1+Model1 → Key1+Model2 → ... → Key2+Model1 → Key2+Model2 → ... → sukses/gagal
 
 # Skip pre-validation untuk menghemat quota (True = hemat 1 request per analisis)
 # Set False jika sudah pakai paid tier / quota besar

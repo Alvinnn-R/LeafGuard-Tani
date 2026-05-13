@@ -30,6 +30,7 @@ from models.schemas import (
 from prompts.system import (
     DISCLAIMER,
     GENERATION_CONFIG,
+    GEMINI_MODEL,
     MODEL_CHAIN,
     PREVALIDATION_CONFIG,
     SKIP_PREVALIDATION,
@@ -100,28 +101,53 @@ class GeminiError(Exception):
 
 
 # ============================================================
-# Client (lazy init — dibuat setelah load_dotenv di main.py)
+# Client Pool — Multi API Key Rotation
 # ============================================================
+# Setiap API key dari project GCP berbeda punya kuota terpisah.
+# Format .env:
+#   GEMINI_API_KEY=key_utama
+#   GEMINI_API_KEY_2=key_cadangan_1
+#   GEMINI_API_KEY_3=key_cadangan_2
 
-_client: genai.Client | None = None
+_clients: list[genai.Client] = []
 
 
-def _get_client() -> genai.Client:
-    """Ambil atau buat Gemini client (lazy init).
+def _init_clients() -> list[genai.Client]:
+    """Inisialisasi semua Gemini client dari env vars.
+
+    Membaca:
+      - GEMINI_API_KEY     (wajib, key utama)
+      - GEMINI_API_KEY_2   (opsional)
+      - GEMINI_API_KEY_3   (opsional)
+      - ... sampai GEMINI_API_KEY_10
 
     Raises:
         GeminiError: Jika GEMINI_API_KEY tidak di-set.
     """
-    global _client
-    if _client is None:
-        api_key = os.getenv("GEMINI_API_KEY")
-        if not api_key:
-            raise GeminiError(
-                code="AI_ERROR",
-                message="Konfigurasi AI belum lengkap. Hubungi administrator.",
-            )
-        _client = genai.Client(api_key=api_key)
-    return _client
+    global _clients
+    if _clients:
+        return _clients
+
+    keys = []
+
+    # Key utama (wajib)
+    primary = os.getenv("GEMINI_API_KEY", "").strip()
+    if not primary:
+        raise GeminiError(
+            code="AI_ERROR",
+            message="Konfigurasi AI belum lengkap. Hubungi administrator.",
+        )
+    keys.append(primary)
+
+    # Key tambahan (opsional): GEMINI_API_KEY_2, _3, ... _10
+    for i in range(2, 11):
+        extra = os.getenv(f"GEMINI_API_KEY_{i}", "").strip()
+        if extra:
+            keys.append(extra)
+
+    _clients = [genai.Client(api_key=k) for k in keys]
+    logger.info(f"Initialized {len(_clients)} Gemini API key(s) for rotation")
+    return _clients
 
 
 # ============================================================
@@ -255,26 +281,32 @@ def _parse_both_result(data: dict, processing_time_ms: int) -> AnalysisResult:
 
 
 # ============================================================
-# Gemini API Call with Model Fallback
+# Gemini API Call with Multi-Model + Multi-Key Fallback
 # ============================================================
 
 async def _call_gemini_with_fallback(
     system_prompt: str,
     content_parts: list,
 ) -> str:
-    """Panggil Gemini API dengan model fallback chain.
+    """Panggil Gemini API dengan gabungan multi-model + multi-key rotation.
 
-    Mencoba setiap model dalam MODEL_CHAIN secara berurutan.
-    Jika model gagal karena rate limit, 404, atau error server,
-    otomatis pindah ke model berikutnya.
+    Strategi 2 lapis:
+      Lapis 1 (outer loop): Rotasi API key
+        → Setiap key dari project GCP berbeda punya kuota terpisah.
+      Lapis 2 (inner loop): Rotasi model
+        → Jika model pertama kena 429, coba model berikutnya.
+
+    Flow contoh (2 key, 3 model):
+      Key1+Model1 → Key1+Model2 → Key1+Model3 →
+      Key2+Model1 → Key2+Model2 → Key2+Model3 → gagal
 
     Returns:
         Raw text response dari Gemini (harus JSON).
 
     Raises:
-        GeminiError: Jika semua model gagal.
+        GeminiError: Jika semua kombinasi key+model gagal.
     """
-    gemini_client = _get_client()
+    clients = _init_clients()
 
     gen_config = types.GenerateContentConfig(
         system_instruction=system_prompt,
@@ -285,46 +317,56 @@ async def _call_gemini_with_fallback(
     )
 
     last_error = None
+    total_attempts = 0
 
-    for model_name in MODEL_CHAIN:
-        try:
-            logger.info(f"Trying model: {model_name}")
+    for key_idx, client in enumerate(clients):
+        key_label = f"key-{key_idx+1}/{len(clients)}"
 
-            response = await gemini_client.aio.models.generate_content(
-                model=model_name,
-                contents=content_parts,
-                config=gen_config,
-            )
+        for model_name in MODEL_CHAIN:
+            total_attempts += 1
+            combo = f"{model_name} ({key_label})"
+            try:
+                logger.info(f"Trying {combo}")
 
-            response_text = response.text
-            if response_text:
-                logger.info(f"Success with model: {model_name}")
-                return response_text
-
-            # Response kosong — coba model berikutnya
-            logger.warning(f"Empty response from {model_name}, trying next model...")
-            continue
-
-        except GeminiError:
-            raise
-        except Exception as e:
-            last_error = e
-            if _is_retryable_error(e):
-                logger.warning(f"Model {model_name} failed (retryable): {e}")
-                continue
-            else:
-                # Non-retryable error — langsung gagal
-                logger.error(f"Model {model_name} failed (non-retryable): {e}")
-                raise GeminiError(
-                    code="AI_ERROR",
-                    message="Terjadi kesalahan saat menganalisis foto. Silakan coba lagi.",
+                response = await client.aio.models.generate_content(
+                    model=model_name,
+                    contents=content_parts,
+                    config=gen_config,
                 )
 
-    # Semua model gagal
-    logger.error(f"All models in chain failed. Last error: {last_error}")
+                response_text = response.text
+                if response_text:
+                    logger.info(f"✅ Success with {combo}")
+                    return response_text
+
+                # Response kosong — coba model/key berikutnya
+                logger.warning(f"Empty response from {combo}, trying next...")
+                continue
+
+            except GeminiError:
+                raise
+            except Exception as e:
+                last_error = e
+                if _is_retryable_error(e):
+                    logger.warning(f"⚠️ {combo} failed (retryable): {e}")
+                    continue
+                else:
+                    # Non-retryable error — langsung gagal
+                    logger.error(f"❌ {combo} failed (non-retryable): {e}")
+                    raise GeminiError(
+                        code="AI_ERROR",
+                        message="Terjadi kesalahan saat menganalisis foto. Silakan coba lagi.",
+                    )
+
+    # Semua kombinasi key+model gagal
+    logger.error(
+        f"All combinations exhausted ({total_attempts} attempts, "
+        f"{len(clients)} keys × {len(MODEL_CHAIN)} models). "
+        f"Last error: {last_error}"
+    )
     raise GeminiError(
         code="RATE_LIMITED",
-        message="Layanan AI sedang sibuk. Silakan tunggu beberapa saat dan coba lagi.",
+        message="Kuota analisis hari ini sudah habis. Silakan coba lagi besok atau hubungi administrator.",
     )
 
 
@@ -345,7 +387,7 @@ async def _prevalidate_image(
     Returns:
         True jika gambar valid, False jika bukan.
     """
-    gemini_client = _get_client()
+    gemini_client = _init_clients()[0]  # Pakai key pertama untuk pre-validation
     prevalidation_prompt = get_prevalidation_prompt(image_type)
 
     gen_config = types.GenerateContentConfig(
@@ -362,8 +404,7 @@ async def _prevalidate_image(
     ]
 
     try:
-        # Gunakan model pertama di chain (paling cepat)
-        model_name = MODEL_CHAIN[0]
+        model_name = GEMINI_MODEL
         logger.info(f"Pre-validation ({image_type}) with model: {model_name}")
 
         response = await gemini_client.aio.models.generate_content(
