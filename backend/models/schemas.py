@@ -74,7 +74,8 @@ class ControlMeasures(BaseModel):
 class DiagnosisResult(BaseModel):
     """Output diagnosa tanaman dari Gemini. Mode: plant | both.
 
-    Field inti (wajib):
+    Field inti (wajib — tapi diberi default agar toleran terhadap
+    response dari model fallback yang kadang tidak lengkap):
         disease_id, disease_name, confidence, confidence_score,
         urgency, symptom_description, spread_mechanism, is_healthy, disclaimer
 
@@ -83,19 +84,24 @@ class DiagnosisResult(BaseModel):
         control_measures, reference
     """
     # === Field Inti ===
+    # Default values ditambahkan agar tidak crash jika Gemini
+    # mengembalikan JSON yang kurang field (terutama dari model lite)
     disease_id: str = Field(
+        default="UNKNOWN",
         description="D01-D20, HEALTHY, atau UNKNOWN"
     )
     disease_name: str = Field(
+        default="Tidak Teridentifikasi",
         description="Nama penyakit dalam Bahasa Indonesia"
     )
-    confidence: Confidence
-    confidence_score: float = Field(ge=0.0, le=1.0)
-    urgency: Urgency
-    symptom_description: str
-    spread_mechanism: str
-    is_healthy: bool
+    confidence: Confidence = Field(default=Confidence.LOW)
+    confidence_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    urgency: Urgency = Field(default=Urgency.MONITOR)
+    symptom_description: str = Field(default="Tidak ada deskripsi gejala.")
+    spread_mechanism: str = Field(default="Tidak diketahui.")
+    is_healthy: bool = Field(default=False)
     disclaimer: str = Field(
+        default="Hasil ini adalah diagnosa awal. Konfirmasikan dengan penyuluh pertanian untuk penanganan lanjutan.",
         description="SELALU hardcoded dari server, bukan dari AI"
     )
 
