@@ -102,12 +102,23 @@ export default function Analysis() {
     return URL.createObjectURL(file);
   }, [plantImage, labelImage]);
 
+  const labelPreviewUrl = useMemo(() => {
+    if (!labelImage) return null;
+    return URL.createObjectURL(labelImage);
+  }, [labelImage]);
+
   // Cleanup URL saat berubah
   React.useEffect(() => {
     return () => {
       if (scanPreviewUrl) URL.revokeObjectURL(scanPreviewUrl);
     };
   }, [scanPreviewUrl]);
+
+  React.useEffect(() => {
+    return () => {
+      if (labelPreviewUrl) URL.revokeObjectURL(labelPreviewUrl);
+    };
+  }, [labelPreviewUrl]);
 
   /**
    * Submit analisis
@@ -161,6 +172,7 @@ export default function Analysis() {
         <LoadingState
           mode={mode}
           imageUrl={scanPreviewUrl}
+          labelImageUrl={mode === 'both' ? labelPreviewUrl : null}
           onCancel={cancelAnalysis}
         />
       )}
@@ -257,7 +269,7 @@ export default function Analysis() {
                 <div className="relative aspect-[16/10] bg-gray-100">
                   <img
                     src={scanPreviewUrl}
-                    alt="Foto yang dianalisis"
+                    alt="Foto tanaman yang dianalisis"
                     className="w-full h-full object-cover"
                   />
                   {/* Gradient overlay bawah */}
@@ -267,7 +279,7 @@ export default function Analysis() {
                     <span className="inline-flex items-center gap-1.5 px-2.5 py-1 
                                      bg-white/90 backdrop-blur-sm rounded-lg text-xs font-semibold text-gray-700 shadow-sm">
                       <img src="/logo/logo_2.svg" alt="" className="w-3.5 h-3.5" />
-                      {config.title}
+                      {mode === 'both' ? 'Foto Tanaman' : config.title}
                     </span>
                   </div>
                   {/* Status badge */}
@@ -275,6 +287,33 @@ export default function Analysis() {
                     <span className="inline-flex items-center gap-1.5 px-2.5 py-1 
                                      bg-green-500/90 backdrop-blur-sm rounded-lg text-xs font-semibold text-white">
                       ✓ Analisis Selesai
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Foto label (mode: both) */}
+            {mode === 'both' && labelPreviewUrl && (
+              <div className="card overflow-hidden p-0">
+                <div className="relative aspect-[16/10] bg-gray-100">
+                  <img
+                    src={labelPreviewUrl}
+                    alt="Foto label yang dianalisis"
+                    className="w-full h-full object-cover"
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent" />
+                  <div className="absolute top-3 left-3">
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 
+                                     bg-white/90 backdrop-blur-sm rounded-lg text-xs font-semibold text-gray-700 shadow-sm">
+                      <img src="/logo/logo_2.svg" alt="" className="w-3.5 h-3.5" />
+                      Foto Label
+                    </span>
+                  </div>
+                  <div className="absolute bottom-3 left-3">
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 
+                                     bg-green-500/90 backdrop-blur-sm rounded-lg text-xs font-semibold text-white">
+                      ✓ Label Terbaca
                     </span>
                   </div>
                 </div>

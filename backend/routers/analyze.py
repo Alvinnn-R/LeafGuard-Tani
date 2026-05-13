@@ -150,7 +150,7 @@ async def analyze(
     # agar plant_url & label_url tersimpan dengan benar.
     # Tapi ini semua tetap fire-and-forget (tidak blocking response ke user).
     device_id = x_device_id or None
-    result_dict = result.model_dump()
+    result_dict = result.model_dump(mode="json")
 
     asyncio.create_task(
         _upload_and_save(
