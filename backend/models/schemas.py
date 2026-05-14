@@ -133,29 +133,49 @@ class DiagnosisResult(BaseModel):
 
 
 class LabelInfo(BaseModel):
-    """Output interpretasi label produk dari OCR Gemini. Mode: label | both."""
-    product_name: str
-    active_ingredients: list[ActiveIngredient]
+    """Output interpretasi label produk dari OCR Gemini. Mode: label | both.
+
+    Semua field diberi default agar toleran terhadap response tidak lengkap.
+    Prompt sudah diinstruksikan untuk TIDAK mengembalikan null/kosong,
+    tapi fallback model mungkin tetap melakukannya.
+    """
+    product_name: str = Field(default="Produk tidak teridentifikasi")
+    active_ingredients: list[ActiveIngredient] = Field(
+        default_factory=lambda: [ActiveIngredient(name="Bahan aktif tidak teridentifikasi", concentration="Baca label kemasan")],
+    )
     dose_technical: str = Field(
+        default="Konsultasikan dosis dengan penyuluh pertanian setempat",
         description="Dosis sesuai label (e.g., '1.5 ml/L')"
     )
     dose_familiar: str = Field(
+        default="Konsultasikan takaran dengan penyuluh pertanian setempat",
         description="Konversi ke satuan familiar (e.g., '½ sendok teh per liter air')"
     )
-    application_timing: str
-    target_pests: list[str]
-    safety_warnings: list[str] = Field(
-        description="SELALU tampilkan, bahkan jika field lain low-confidence"
+    application_timing: str = Field(default="Aplikasikan pagi hari (06:00-09:00) atau sore hari (15:00-17:00) saat cuaca tidak terlalu panas")
+    target_pests: list[str] = Field(
+        default_factory=lambda: ["Konsultasikan sasaran hama dengan penyuluh pertanian"],
     )
-    confidence_notes: Optional[str] = None
+    safety_warnings: list[str] = Field(
+        default_factory=lambda: [
+            "Jauhkan dari jangkauan anak-anak",
+            "Gunakan alat pelindung diri (APD) saat aplikasi",
+            "Cuci tangan dengan sabun setelah penggunaan",
+        ],
+        description="WAJIB minimal 3 item, bahkan jika field lain low-confidence"
+    )
+    confidence_notes: str = Field(
+        default="Informasi diekstrak dari label dan dilengkapi dari pengetahuan AI",
+        description="Catatan keterbacaan label — TIDAK BOLEH null"
+    )
 
 
 class RecommendationCard(BaseModel):
     """Output rekomendasi terpadu. Mode: both saja."""
-    product_suitable: bool
-    suitability_reason: str
-    recommended_product_type: Optional[str] = None
+    product_suitable: bool = Field(default=False)
+    suitability_reason: str = Field(default="Tidak dapat ditentukan")
+    recommended_product_type: Optional[str] = Field(default=None)
     action_steps: list[str] = Field(
+        default_factory=lambda: ["Konsultasikan dengan penyuluh pertanian setempat"],
         max_length=5,
         description="3-5 langkah konkret, bahasa sederhana"
     )

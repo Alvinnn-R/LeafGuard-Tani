@@ -80,22 +80,39 @@ const URGENCY_CONFIG = {
 };
 
 /**
- * Konfigurasi visual confidence
+ * Konfigurasi visual confidence — berdasarkan persentase
  */
 const CONFIDENCE_CONFIG = {
   HIGH: {
-    label: 'Keyakinan Tinggi',
     badgeClass: 'badge-high',
   },
   MEDIUM: {
-    label: 'Keyakinan Sedang',
     badgeClass: 'badge-medium',
   },
   LOW: {
-    label: 'Keyakinan Rendah',
     badgeClass: 'badge-low',
   },
 };
+
+/**
+ * Generate label akurasi berdasarkan confidence_score.
+ * Contoh: "Akurasi 85%" atau "Akurasi 0%"
+ */
+function getConfidenceLabel(score) {
+  const pct = Math.round((score || 0) * 100);
+  return `Akurasi Gejala ${pct}%`;
+}
+
+/**
+ * Tentukan apakah hasil analisis seharusnya ditampilkan sebagai "Sehat".
+ * Kondisi: is_healthy=true ATAU confidence_score sangat rendah (<=5%)
+ * dan disease_id UNKNOWN.
+ */
+function shouldShowAsHealthy(diagnosis) {
+  if (diagnosis.is_healthy) return true;
+  if ((diagnosis.confidence_score || 0) <= 0.05 && diagnosis.disease_id === 'UNKNOWN') return true;
+  return false;
+}
 
 export default function AnalysisResult({ diagnosis }) {
   if (!diagnosis) return null;
@@ -107,7 +124,6 @@ export default function AnalysisResult({ diagnosis }) {
     urgency,
     symptom_description,
     spread_mechanism,
-    is_healthy,
     disclaimer,
     // Extended BBPOPT fields
     pathogen,
@@ -118,7 +134,13 @@ export default function AnalysisResult({ diagnosis }) {
     reference,
   } = diagnosis;
 
-  const urgencyConfig = URGENCY_CONFIG[urgency] || URGENCY_CONFIG.MONITOR;
+  // Cek apakah harus ditampilkan sebagai "Sehat"
+  const isHealthy = shouldShowAsHealthy(diagnosis);
+  const displayName = isHealthy ? 'Tanaman Terlihat Sehat' : disease_name;
+
+  const urgencyConfig = isHealthy
+    ? URGENCY_CONFIG.MONITOR
+    : (URGENCY_CONFIG[urgency] || URGENCY_CONFIG.MONITOR);
   const confidenceConfig = CONFIDENCE_CONFIG[confidence] || CONFIDENCE_CONFIG.MEDIUM;
   const UrgencyIcon = urgencyConfig.icon;
 
@@ -126,33 +148,33 @@ export default function AnalysisResult({ diagnosis }) {
     <div className="animate-slide-up">
       {/* Main card */}
       <div className={`card border-l-4 ${urgencyConfig.borderClass} overflow-hidden`}>
-        
+
         {/* Header: Disease name + badges */}
         <div className="mb-4">
           {/* Disease name */}
           <div className="flex items-start gap-3 mb-3">
             <div className={`
               w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0
-              ${is_healthy ? 'bg-green-100' : 'bg-red-50'}
+              ${isHealthy ? 'bg-green-100' : 'bg-red-50'}
             `}>
-              {is_healthy
+              {isHealthy
                 ? <ShieldCheck size={22} className="text-green-600" />
                 : <Activity size={22} className="text-red-500" />
               }
             </div>
             <div className="min-w-0">
               <h2 className="text-lg font-bold text-gray-900 leading-tight">
-                {disease_name}
+                {displayName}
               </h2>
               {/* Patogen info */}
-              {pathogen && !is_healthy && (
+              {pathogen && !isHealthy && (
                 <p className="text-xs text-gray-500 mt-0.5 italic">
                   {pathogen} {pathogen_type ? `(${pathogen_type})` : ''}
                 </p>
               )}
-              {is_healthy && (
+              {isHealthy && (
                 <p className="text-sm text-green-600 font-medium mt-0.5">
-                  Tidak ditemukan masalah
+                  Tidak ditemukan gejala penyakit pada tanaman
                 </p>
               )}
             </div>
@@ -166,13 +188,13 @@ export default function AnalysisResult({ diagnosis }) {
               {urgencyConfig.label}
             </span>
 
-            {/* Confidence badge */}
+            {/* Confidence / Akurasi badge */}
             <span className={confidenceConfig.badgeClass}>
-              {confidenceConfig.label} ({Math.round(confidence_score * 100)}%)
+              {getConfidenceLabel(confidence_score)}
             </span>
 
             {/* Affected part badge */}
-            {affected_part && !is_healthy && (
+            {affected_part && !isHealthy && (
               <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200">
                 <MapPin size={12} />
                 {affected_part}
@@ -184,21 +206,23 @@ export default function AnalysisResult({ diagnosis }) {
         {/* Divider */}
         <hr className="border-gray-100 -mx-4 mb-4" />
 
-        {/* Gejala yang terdeteksi */}
-        <div className="mb-4">
-          <div className="flex items-center gap-2 mb-2">
-            <Leaf size={16} className="text-green-600 flex-shrink-0" />
-            <h3 className="text-sm font-semibold text-gray-700">
-              Gejala yang Terdeteksi
-            </h3>
+        {/* Gejala yang terdeteksi — hide jika healthy */}
+        {!isHealthy && (
+          <div className="mb-4">
+            <div className="flex items-center gap-2 mb-2">
+              <Leaf size={16} className="text-green-600 flex-shrink-0" />
+              <h3 className="text-sm font-semibold text-gray-700">
+                Gejala yang Terdeteksi
+              </h3>
+            </div>
+            <p className="text-sm text-gray-600 leading-relaxed pl-6">
+              {symptom_description}
+            </p>
           </div>
-          <p className="text-sm text-gray-600 leading-relaxed pl-6">
-            {symptom_description}
-          </p>
-        </div>
+        )}
 
         {/* Mekanisme penyebaran — hide jika healthy */}
-        {!is_healthy && spread_mechanism && spread_mechanism !== '-' && (
+        {!isHealthy && spread_mechanism && spread_mechanism !== '-' && spread_mechanism !== 'Tidak diketahui.' && (
           <div className="mb-4">
             <div className="flex items-center gap-2 mb-2">
               <Wind size={16} className="text-orange-500 flex-shrink-0" />
@@ -213,7 +237,7 @@ export default function AnalysisResult({ diagnosis }) {
         )}
 
         {/* Faktor epidemi */}
-        {!is_healthy && epidemic_factors && epidemic_factors.length > 0 && (
+        {!isHealthy && epidemic_factors && epidemic_factors.length > 0 && (
           <div className="mb-4">
             <div className="flex items-center gap-2 mb-2">
               <AlertCircle size={16} className="text-amber-500 flex-shrink-0" />
@@ -233,7 +257,7 @@ export default function AnalysisResult({ diagnosis }) {
         )}
 
         {/* ====== TINDAKAN PENGENDALIAN ====== */}
-        {!is_healthy && control_measures && (
+        {!isHealthy && control_measures && (
           <div className="mb-4">
             {/* Preventif */}
             {control_measures.preventive && control_measures.preventive.length > 0 && (

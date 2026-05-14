@@ -228,8 +228,16 @@ def _build_content_parts(
 
 def _parse_plant_result(data: dict, processing_time_ms: int) -> AnalysisResult:
     """Parse response Gemini mode plant ke AnalysisResult."""
-    data["disclaimer"] = DISCLAIMER
-    diagnosis = DiagnosisResult(**data)
+    try:
+        data["disclaimer"] = DISCLAIMER
+        # Fix common Gemini issue: confidence_score > 1.0 (e.g. 92 instead of 0.92)
+        cs = data.get("confidence_score")
+        if cs is not None and isinstance(cs, (int, float)) and cs > 1.0:
+            data["confidence_score"] = min(cs / 100.0, 1.0)
+        diagnosis = DiagnosisResult(**data)
+    except Exception as e:
+        logger.warning(f"Failed to parse diagnosis in mode=plant: {e}")
+        diagnosis = DiagnosisResult()  # Use all defaults
 
     return AnalysisResult(
         diagnosis=diagnosis,
@@ -239,9 +247,63 @@ def _parse_plant_result(data: dict, processing_time_ms: int) -> AnalysisResult:
     )
 
 
+def _sanitize_label_data(data: dict) -> dict:
+    """Post-processing: bersihkan field label yang benar-benar kosong.
+
+    Sanitizer ini HANYA aktif jika field null/kosong/"".
+    TIDAK menimpa jawaban pendek Gemini yang mungkin valid.
+    Default diisi dengan teks informatif, bukan teks generik.
+    """
+    sanitized = dict(data)
+
+    # --- confidence_notes: harus kalimat bermakna, bukan 1 kata ---
+    cn = sanitized.get("confidence_notes")
+    if not cn or (isinstance(cn, str) and len(cn.strip()) < 10):
+        sanitized["confidence_notes"] = (
+            "Informasi diekstrak dari label dan dilengkapi dari pengetahuan AI. "
+            "Verifikasi dengan membaca label secara langsung untuk kepastian."
+        )
+
+    # --- Pastikan string field tidak null/kosong ---
+    str_field_defaults = {
+        "product_name": "Produk tidak teridentifikasi",
+        "dose_technical": "Konsultasikan dosis dengan penyuluh pertanian setempat",
+        "dose_familiar": "Konsultasikan takaran dengan penyuluh pertanian setempat",
+        "application_timing": "Aplikasikan pagi hari (06:00-09:00) atau sore hari (15:00-17:00) saat cuaca tidak terlalu panas",
+    }
+    for field, default_val in str_field_defaults.items():
+        val = sanitized.get(field)
+        # Hanya replace jika benar-benar null, kosong, atau cuma tanda baca
+        if not val or (isinstance(val, str) and len(val.strip().strip('-_.')) == 0):
+            sanitized[field] = default_val
+
+    # --- Pastikan array field tidak kosong ---
+    if not sanitized.get("target_pests") or len(sanitized["target_pests"]) == 0:
+        sanitized["target_pests"] = ["Konsultasikan sasaran hama dengan penyuluh pertanian"]
+
+    if not sanitized.get("safety_warnings") or len(sanitized["safety_warnings"]) < 3:
+        sanitized["safety_warnings"] = [
+            "Jauhkan dari jangkauan anak-anak",
+            "Gunakan alat pelindung diri (APD) saat aplikasi",
+            "Cuci tangan dengan sabun setelah penggunaan",
+        ]
+
+    if not sanitized.get("active_ingredients") or len(sanitized["active_ingredients"]) == 0:
+        sanitized["active_ingredients"] = [
+            {"name": "Bahan aktif tidak teridentifikasi", "concentration": "Baca label kemasan"}
+        ]
+
+    return sanitized
+
+
 def _parse_label_result(data: dict, processing_time_ms: int) -> AnalysisResult:
     """Parse response Gemini mode label ke AnalysisResult."""
-    label_info = LabelInfo(**data)
+    try:
+        sanitized = _sanitize_label_data(data)
+        label_info = LabelInfo(**sanitized)
+    except Exception as e:
+        logger.warning(f"Failed to parse label in mode=label: {e}")
+        label_info = LabelInfo()  # Use all defaults
 
     return AnalysisResult(
         diagnosis=None,
@@ -252,25 +314,68 @@ def _parse_label_result(data: dict, processing_time_ms: int) -> AnalysisResult:
 
 
 def _parse_both_result(data: dict, processing_time_ms: int) -> AnalysisResult:
-    """Parse response Gemini mode both ke AnalysisResult."""
-    if "diagnosis" in data and data["diagnosis"]:
-        data["diagnosis"]["disclaimer"] = DISCLAIMER
+    """Parse response Gemini mode both ke AnalysisResult.
 
-    diagnosis = (
-        DiagnosisResult(**data["diagnosis"])
-        if data.get("diagnosis")
-        else None
-    )
-    label_info = (
-        LabelInfo(**data["label_info"])
-        if data.get("label_info")
-        else None
-    )
-    recommendation = (
-        RecommendationCard(**data["recommendation"])
-        if data.get("recommendation")
-        else None
-    )
+    PENTING: Gemini kadang skip label_info dan recommendation saat tanaman sehat.
+    Backend HARUS tetap mengembalikan ketiganya (diagnosis, label_info, recommendation)
+    karena user sudah mengirim foto label dan berhak melihat hasilnya.
+
+    Setiap section di-wrap try-except agar satu bagian error
+    tidak menghancurkan seluruh respons.
+    """
+
+    # --- DIAGNOSIS ---
+    diagnosis = None
+    try:
+        diag_data = data.get("diagnosis")
+        if diag_data and isinstance(diag_data, dict):
+            diag_data["disclaimer"] = DISCLAIMER
+            # Fix common Gemini issues: confidence_score > 1.0 (e.g. 92 instead of 0.92)
+            cs = diag_data.get("confidence_score")
+            if cs is not None and isinstance(cs, (int, float)) and cs > 1.0:
+                diag_data["confidence_score"] = min(cs / 100.0, 1.0)
+            diagnosis = DiagnosisResult(**diag_data)
+    except Exception as e:
+        logger.warning(f"Failed to parse diagnosis in mode=both: {e}")
+        diagnosis = DiagnosisResult()  # Use all defaults
+
+    # --- LABEL INFO (HARUS SELALU ADA) ---
+    label_info = None
+    try:
+        label_data = data.get("label_info")
+        if label_data and isinstance(label_data, dict):
+            label_info = LabelInfo(**_sanitize_label_data(label_data))
+        else:
+            logger.warning("Gemini mode=both did not return label_info, creating default")
+            label_info = LabelInfo()
+    except Exception as e:
+        logger.warning(f"Failed to parse label_info in mode=both: {e}")
+        label_info = LabelInfo()  # Use all defaults
+
+    # --- RECOMMENDATION (HARUS SELALU ADA) ---
+    recommendation = None
+    try:
+        rec_data = data.get("recommendation")
+        if rec_data and isinstance(rec_data, dict):
+            recommendation = RecommendationCard(**rec_data)
+        else:
+            logger.warning("Gemini mode=both did not return recommendation, creating default")
+            is_healthy = diagnosis.is_healthy if diagnosis else False
+            recommendation = RecommendationCard(
+                product_suitable=False,
+                suitability_reason=(
+                    "Tanaman dalam kondisi sehat. Produk ini dapat digunakan sebagai tindakan pencegahan."
+                    if is_healthy
+                    else "Tidak dapat ditentukan karena data tidak lengkap."
+                ),
+                action_steps=[
+                    "Baca petunjuk penggunaan pada label kemasan dengan teliti",
+                    "Konsultasikan dengan penyuluh pertanian setempat",
+                ],
+            )
+    except Exception as e:
+        logger.warning(f"Failed to parse recommendation in mode=both: {e}")
+        recommendation = RecommendationCard()
 
     return AnalysisResult(
         diagnosis=diagnosis,

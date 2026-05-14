@@ -159,8 +159,8 @@ export default function LabelResult({ labelInfo }) {
           </div>
         )}
 
-        {/* Confidence Notes — jika sebagian teks tidak terbaca */}
-        {confidence_notes && (
+        {/* Confidence Notes — info sumber data (OCR vs AI knowledge) */}
+        {confidence_notes && confidence_notes.length > 15 && (
           <div className="flex items-start gap-2 mt-3 p-3 bg-amber-50 rounded-xl border border-amber-100">
             <AlertCircle size={14} className="text-amber-600 mt-0.5 flex-shrink-0" />
             <p className="text-xs text-amber-700 leading-relaxed italic">

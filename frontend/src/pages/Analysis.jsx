@@ -183,6 +183,7 @@ export default function Analysis() {
           code={error.code}
           message={error.message}
           retryable={error.retryable}
+          mode={mode}
           onRetry={retry}
           onReset={handleResetFromError}
         />

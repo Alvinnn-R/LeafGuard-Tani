@@ -8,6 +8,7 @@ import { AlertTriangle, WifiOff, ImageOff, RefreshCw, Camera, ServerCrash } from
  * @param {string} props.code - Error code dari backend (e.g., "INVALID_IMAGE", "AI_ERROR")
  * @param {string} props.message - Pesan error dalam Bahasa Indonesia
  * @param {boolean} props.retryable - Apakah error bisa di-retry
+ * @param {string} [props.mode] - Mode analisis aktif ("plant" | "label" | "both")
  * @param {() => void} [props.onRetry] - Callback untuk retry (tombol "Coba Lagi")
  * @param {() => void} [props.onReset] - Callback untuk upload ulang / kembali ke awal
  */
@@ -68,14 +69,27 @@ const DEFAULT_CONFIG = {
 };
 
 /**
- * Tips kontekstual berdasarkan error code
+ * Tips kontekstual berdasarkan error code DAN mode analisis
  */
+const ERROR_TIPS_PLANT = [
+  'Pastikan foto menampilkan daun atau batang tanaman padi dengan jelas',
+  'Ambil foto di tempat dengan cahaya cukup',
+  'Hindari foto yang terlalu jauh atau terlalu dekat',
+];
+
+const ERROR_TIPS_LABEL = [
+  'Pastikan foto menampilkan label kemasan pestisida atau pupuk pertanian',
+  'Usahakan seluruh teks pada label terlihat jelas',
+  'Hindari pantulan cahaya dan bayangan pada label',
+];
+
+const ERROR_TIPS_BOTH = [
+  'Pastikan foto tanaman menampilkan gejala penyakit dengan jelas',
+  'Pastikan foto label menampilkan nama produk dan bahan aktif',
+  'Ambil foto di tempat dengan cahaya cukup',
+];
+
 const ERROR_TIPS = {
-  INVALID_IMAGE: [
-    'Pastikan foto menampilkan daun atau batang tanaman padi dengan jelas',
-    'Ambil foto di tempat dengan cahaya cukup',
-    'Hindari foto yang terlalu jauh atau terlalu dekat',
-  ],
   FILE_TOO_LARGE: [
     'Gunakan resolusi kamera yang lebih rendah',
     'Foto akan dikompresi otomatis, tapi ukuran awal sebaiknya di bawah 10MB',
@@ -95,16 +109,30 @@ const ERROR_TIPS = {
   ],
 };
 
+/**
+ * Ambil tips berdasarkan error code dan mode.
+ */
+function getTips(code, mode) {
+  // Untuk INVALID_IMAGE, tips berbeda per mode
+  if (code === 'INVALID_IMAGE') {
+    if (mode === 'label') return ERROR_TIPS_LABEL;
+    if (mode === 'both') return ERROR_TIPS_BOTH;
+    return ERROR_TIPS_PLANT; // default: plant
+  }
+  return ERROR_TIPS[code] || [];
+}
+
 export default function ErrorState({
   code = 'AI_ERROR',
   message,
   retryable = true,
+  mode = 'plant',
   onRetry,
   onReset,
 }) {
   const config = ERROR_CONFIG[code] || DEFAULT_CONFIG;
   const ErrorIcon = config.icon;
-  const tips = ERROR_TIPS[code] || [];
+  const tips = getTips(code, mode);
 
   const defaultMessage = 'Terjadi kesalahan yang tidak terduga. Silakan coba lagi.';
 
