@@ -188,10 +188,12 @@ export default function AnalysisResult({ diagnosis }) {
               {urgencyConfig.label}
             </span>
 
-            {/* Confidence / Akurasi badge */}
-            <span className={confidenceConfig.badgeClass}>
-              {getConfidenceLabel(confidence_score)}
-            </span>
+            {/* Confidence / Akurasi Gejala badge — hide saat sehat karena tidak ada gejala */}
+            {!isHealthy && (
+              <span className={confidenceConfig.badgeClass}>
+                {getConfidenceLabel(confidence_score)}
+              </span>
+            )}
 
             {/* Affected part badge */}
             {affected_part && !isHealthy && (
