@@ -563,7 +563,7 @@ async def analyze_image(
 
     # === Step 0: Pre-validation — skrining cepat gambar ===
     # Dilewati jika SKIP_PREVALIDATION=True (hemat quota free tier)
-    skip_label_in_both = False  # Flag: skip label jika invalid di mode both
+    # Mode both: KEDUA gambar harus valid, jika salah satu gagal → reject
     if not SKIP_PREVALIDATION:
         if mode in ("plant", "both") and plant_bytes:
             is_valid_plant = await _prevalidate_image(
@@ -581,34 +581,17 @@ async def analyze_image(
                 label_bytes, label_mime or "image/jpeg", "label"
             )
             if not is_valid_label:
-                if mode == "both":
-                    # Mode both: skip label, lanjut analisis tanaman saja
-                    logger.info(
-                        "Pre-validation rejected label in mode=both — "
-                        "falling back to plant-only analysis"
-                    )
-                    skip_label_in_both = True
-                else:
-                    # Mode label saja: tetap reject
-                    logger.info("Pre-validation rejected label image (not agricultural label)")
-                    raise GeminiError(
-                        code="INVALID_IMAGE",
-                        message="Unggah foto label kemasan pestisida atau pupuk pertanian.",
-                    )
+                logger.info("Pre-validation rejected label image (not agricultural label)")
+                raise GeminiError(
+                    code="INVALID_IMAGE",
+                    message="Unggah foto label kemasan pestisida atau pupuk pertanian.",
+                )
     else:
         logger.info("Pre-validation skipped (SKIP_PREVALIDATION=True, hemat quota)")
 
-    # Jika label invalid di mode both, downgrade ke plant-only
-    effective_mode = mode
-    if skip_label_in_both and mode == "both":
-        effective_mode = "plant"
-        logger.info("Mode both downgraded to plant (label invalid)")
-
-    system_prompt = get_system_prompt(effective_mode)
+    system_prompt = get_system_prompt(mode)
     content_parts = _build_content_parts(
-        effective_mode, plant_bytes, plant_mime,
-        label_bytes if effective_mode != "plant" else None,
-        label_mime if effective_mode != "plant" else None,
+        mode, plant_bytes, plant_mime, label_bytes, label_mime
     )
 
     # === Step 1: Panggil Gemini API dengan fallback ===
@@ -664,13 +647,12 @@ async def analyze_image(
     processing_time_ms = int((time.time() - start_time) * 1000)
 
     # === Step 4: Validasi schema dan bangun AnalysisResult ===
-    # Gunakan effective_mode (bukan mode asli) karena bisa di-downgrade
     try:
-        if effective_mode == "plant":
+        if mode == "plant":
             return _parse_plant_result(result_data, processing_time_ms)
-        elif effective_mode == "label":
+        elif mode == "label":
             return _parse_label_result(result_data, processing_time_ms)
-        elif effective_mode == "both":
+        elif mode == "both":
             return _parse_both_result(result_data, processing_time_ms)
         else:
             raise GeminiError(

@@ -54,7 +54,7 @@ export default function SummaryCard({ result, mode }) {
       const emoji = URGENCY_EMOJI[diagnosis.urgency] || '⚪';
       lines.push(`🔬 *Diagnosa:* ${diagnosis.disease_name}`);
       lines.push(`${emoji} *Urgensi:* ${URGENCY_LABELS[diagnosis.urgency] || diagnosis.urgency}`);
-      lines.push(`📊 *Akurasi:* ${Math.round(diagnosis.confidence_score * 100)}%`);
+      lines.push(`📊 *Akurasi Gejala:* ${Math.round(diagnosis.confidence_score * 100)}%`);
       lines.push('');
     } else if (diagnosis && isHealthy) {
       lines.push('✅ *Tanaman Terlihat Sehat* — Tidak ditemukan gejala penyakit');
@@ -168,10 +168,10 @@ export default function SummaryCard({ result, mode }) {
           {diagnosis && (
             <div className="mb-4">
               <h3 className="text-lg font-bold text-white mb-1.5">
-              {(diagnosis.is_healthy || ((diagnosis.confidence_score || 0) <= 0.05 && diagnosis.disease_id === 'UNKNOWN'))
-                ? 'Tanaman Terlihat Sehat'
-                : diagnosis.disease_name
-              }
+                {(diagnosis.is_healthy || ((diagnosis.confidence_score || 0) <= 0.05 && diagnosis.disease_id === 'UNKNOWN'))
+                  ? 'Tanaman Terlihat Sehat'
+                  : diagnosis.disease_name
+                }
               </h3>
               <div className="flex items-center gap-2">
                 <span className="inline-flex items-center gap-1.5 px-2.5 py-1 
@@ -181,7 +181,7 @@ export default function SummaryCard({ result, mode }) {
                 </span>
                 <span className="inline-flex items-center px-2.5 py-1 
                                  bg-white/15 backdrop-blur-sm rounded-full text-xs font-medium text-white/90">
-                  Akurasi {Math.round(diagnosis.confidence_score * 100)}%
+                  Akurasi Gejala {Math.round(diagnosis.confidence_score * 100)}%
                 </span>
               </div>
             </div>

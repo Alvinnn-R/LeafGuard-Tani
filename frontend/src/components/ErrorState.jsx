@@ -84,8 +84,9 @@ const ERROR_TIPS_LABEL = [
 ];
 
 const ERROR_TIPS_BOTH = [
-  'Pastikan foto tanaman menampilkan gejala penyakit dengan jelas',
-  'Pastikan foto label menampilkan nama produk dan bahan aktif',
+  'Analisis Lengkap membutuhkan foto tanaman padi DAN label produk pertanian',
+  'Pastikan foto tanaman menampilkan daun, batang, atau malai padi',
+  'Pastikan foto label menampilkan produk pestisida atau pupuk pertanian',
   'Ambil foto di tempat dengan cahaya cukup',
 ];
 
