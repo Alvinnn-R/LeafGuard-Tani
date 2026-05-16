@@ -8,7 +8,7 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.ico', 'apple-touch-icon.png'],
+      includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'logo/logo_2_192.png', 'logo/logo_2_512.png'],
       manifest: {
         name: 'LeafGuard Tani',
         short_name: 'LeafGuard',
@@ -22,17 +22,17 @@ export default defineConfig({
         categories: ['agriculture', 'productivity'],
         icons: [
           {
-            src: '/icons/icon-192x192.png',
+            src: '/logo/logo_2_192.png',
             sizes: '192x192',
             type: 'image/png',
           },
           {
-            src: '/icons/icon-512x512.png',
+            src: '/logo/logo_2_512.png',
             sizes: '512x512',
             type: 'image/png',
           },
           {
-            src: '/icons/icon-512x512.png',
+            src: '/logo/logo_2_512.png',
             sizes: '512x512',
             type: 'image/png',
             purpose: 'maskable',
