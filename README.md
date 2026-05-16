@@ -210,7 +210,7 @@ Daftar endpoint REST yang tersedia di backend LeafGuard Tani:
 MIT License
 
 ## Tim
-**Nama Aplikasi:** LeafGuard Tani
-**Anggota Tim:** Wahyu Setiawan & Alvin Rama Saputra
-**Kompetisi:** Mini Hackathon Antigravity — Google Developer Groups Surabaya 2026
-**Tema:** Personalized Agri-Tech Monitoring (Agriculture)
+- **Nama Aplikasi:** LeafGuard Tani
+- **Anggota Tim:** Wahyu Setiawan & Alvin Rama Saputra
+- **Kompetisi:** Mini Hackathon Antigravity — Google Developer Groups Surabaya 2026
+- **Tema:** Personalized Agri-Tech Monitoring (Agriculture)
