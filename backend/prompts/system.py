@@ -11,17 +11,7 @@ Ref: prompts.md v1.0.0, Buku Saku Penyakit Padi (BBPOPT 2020)
 
 # Model fallback chain — dicoba berurutan dari atas.
 # Jika model pertama kena 429/error, otomatis coba model berikutnya.
-#
-# VERIFIED 13 Mei 2026 via test_models.py:
-#   OK  gemini-2.5-flash      → utama, stabil
-#   OK  gemini-2.5-flash-lite  → ringan, JSON bagus
-#   OK  gemini-3.1-flash-lite  → baru, JSON bagus
-#   FAIL gemini-2.5-pro         → 429 (kuota 0 free tier)
-#   FAIL gemini-2.0-flash       → 429 (kuota 0 free tier)
-#   FAIL gemini-2.0-flash-lite  → 429 (kuota 0 free tier)
-#   FAIL gemini-1.5-flash       → 404 (dihapus dari API)
-#   FAIL gemini-3-flash-preview → return kosong
-#   FAIL gemini-3.1-flash-lite-preview → 503 (selalu overloaded)
+
 MODEL_CHAIN = [
     "gemini-2.5-flash",          # Utama — paling akurat
     "gemini-2.5-flash-lite",     # Fallback 1 — ringan, cepat
