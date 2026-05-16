@@ -9,7 +9,6 @@ python-dotenv>=1.0.0
 google-genai>=1.0.0
 
 # === Firebase (legacy — keeping for compatibility) ===
-firebase-admin>=6.5.0
 
 # === Supabase ===
 # Menggunakan httpx (bawaan) untuk REST API, package supabase dihapus karena dependensi pyiceberg bentrok di Windows.
